@@ -1,20 +1,31 @@
+"use client";
+
 import { ApolloClient, HttpLink, InMemoryCache } from "@apollo/client";
-import { env } from "@/lib/config/env";
+import { setContext } from "@apollo/client/link/context";
 
-function createApolloClient() {
-  return new ApolloClient({
-    link: new HttpLink({ uri: env.graphqlUrl }),
-    cache: new InMemoryCache(),
-  });
-}
+const httpLink = new HttpLink({
+  uri: process.env.NEXT_PUBLIC_GRAPHQL_URL,
+  credentials: "omit",
+});
 
-const globalForApollo = globalThis as typeof globalThis & {
-  __stamplyApolloClient?: ApolloClient;
-};
+const authLink = setContext((_, { headers }) => {
+  let token: string | null = null;
 
-export const apolloClient =
-  globalForApollo.__stamplyApolloClient ?? createApolloClient();
+  if (typeof window !== "undefined") {
+    token = localStorage.getItem("accessToken");
+  }
 
-if (process.env.NODE_ENV !== "production") {
-  globalForApollo.__stamplyApolloClient = apolloClient;
-}
+  console.log("TOKEN SENT:", token);
+
+  return {
+    headers: {
+      ...headers,
+      Authorization: token ? `Bearer ${token}` : "",
+    },
+  };
+});
+
+export const apolloClient = new ApolloClient({
+  link: authLink.concat(httpLink),
+  cache: new InMemoryCache(),
+});

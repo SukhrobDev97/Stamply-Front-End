@@ -6,8 +6,13 @@ declare global {
       WebApp?: {
         ready: () => void;
         expand: () => void;
+        showScanQrPopup?: (
+          params?: { text?: string },
+          callback?: (data: string) => boolean,
+        ) => void;
         initData: string;
         initDataUnsafe: Record<string, unknown>;
+        platform?: string;
       };
     };
   }
