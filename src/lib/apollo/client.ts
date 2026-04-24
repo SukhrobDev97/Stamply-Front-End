@@ -9,18 +9,16 @@ const httpLink = new HttpLink({
 });
 
 const authLink = setContext((_, { headers }) => {
-  let token: string | null = null;
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
 
-  if (typeof window !== "undefined") {
-    token = localStorage.getItem("accessToken");
-  }
-
+  // Temporary debug log (remove later).
   console.log("TOKEN SENT:", token);
 
   return {
     headers: {
       ...headers,
-      Authorization: token ? `Bearer ${token}` : "",
+      authorization: token ? `Bearer ${token}` : "",
     },
   };
 });

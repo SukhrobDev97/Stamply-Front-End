@@ -115,7 +115,7 @@ const items: BottomNavItem[] = [
   },
   { key: "visits", label: "Visits", href: "/visits", icon: (p) => <IconVisits {...p} /> },
   { key: "rewards", label: "Rewards", href: "/rewards", icon: (p) => <IconRewards {...p} /> },
-  { key: "profile", label: "Profile", icon: (p) => <IconProfile {...p} /> },
+  { key: "profile", label: "Profile", href: "/profile", icon: (p) => <IconProfile {...p} /> },
 ];
 
 export function BottomNav({ currentKey }: { currentKey: string }) {

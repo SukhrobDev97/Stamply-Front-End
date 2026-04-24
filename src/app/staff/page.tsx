@@ -2,6 +2,7 @@
 
 import { useMutation } from "@apollo/client/react";
 import { CREATE_VISIT_MUTATION } from "@/graphql/mutations/createVisit.mutation";
+import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { getTelegramWebApp } from "@/lib/telegram/webapp";
 import { useAuth } from "@/app/providers";
 import { useCallback, useMemo, useState } from "react";
@@ -65,7 +66,11 @@ export default function StaffPage() {
         return true;
       }
 
-      createVisit({ variables: { input: { customerId } } })
+      createVisit({
+        variables: { input: { customerId } },
+        refetchQueries: [{ query: OWNER_DASHBOARD }],
+        awaitRefetchQueries: true,
+      })
         .then(() => {
           setScanState({ status: "success", message: "Stamp added" });
         })

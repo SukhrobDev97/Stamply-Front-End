@@ -1,9 +1,11 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { RequireAuth } from "@/components/common/require-auth";
 import { GIVE_VISIT_MUTATION } from "@/graphql/mutations/giveVisit.mutation";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
+import { useAuth } from "@/app/providers";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -62,7 +64,7 @@ function formatVisitWhen(iso: string) {
 
 function rewardBadgeLabel(status: string): string {
   const s = status.toLowerCase();
-  if (s === "available") return "ACTIVE";
+  if (s === "available") return "AVAILABLE";
   if (s === "redeemed") return "REDEEMED";
   if (s === "expired") return "EXPIRED";
   if (s === "cancelled") return "CANCELLED";
@@ -88,11 +90,13 @@ export default function CustomerDetailPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [rewardModal, setRewardModal] = useState<{ rewardId: number } | null>(null);
 
+  const { ready, isAuthenticated } = useAuth();
   const { data, loading, error, refetch } = useQuery<CustomerDetailQueryResult>(
     CUSTOMER_DETAIL_QUERY,
     {
       variables: { customerId },
-      skip: !Number.isFinite(customerId) || customerId < 1,
+      skip: !ready || !isAuthenticated || !Number.isFinite(customerId) || customerId < 1,
+      fetchPolicy: "network-only",
     },
   );
 
@@ -209,6 +213,7 @@ export default function CustomerDetailPage() {
   }
 
   return (
+    <RequireAuth>
     <div className="min-h-dvh overflow-y-auto bg-[#f7f7f8] text-black">
       <div className="mx-auto max-w-md px-4 pb-32 pt-8">
         <div className="flex items-center justify-between gap-4 mb-4">
@@ -326,5 +331,6 @@ export default function CustomerDetailPage() {
         </div>
       ) : null}
     </div>
+    </RequireAuth>
   );
 }

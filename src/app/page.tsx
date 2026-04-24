@@ -1,14 +1,18 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { RequireAuth } from "@/components/common/require-auth";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
+import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
-import { gql } from "@apollo/client";
-import { useMutation, useQuery } from "@apollo/client/react";
+import { useAuth } from "@/app/providers";
+import { gql, NetworkStatus } from "@apollo/client";
+import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import { Activity, Clock, Loader2, Users } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 type PendingVisit = {
@@ -28,6 +32,29 @@ type RecentRewardRow = {
   customerId: number;
   issuedAt?: string | null;
 };
+
+type RewardRow = {
+  id: number;
+  customerId: number;
+  status: string;
+  issuedAt?: string | null;
+  redeemedAt?: string | null;
+};
+
+type CustomerDetailQueryResult = {
+  customerDetail: {
+    id: number;
+    rewards: { id: number; status: string; issuedAt?: string | null; redeemedAt?: string | null }[];
+  };
+};
+
+function isUnlockedReward(status: string) {
+  return status.toLowerCase() === "available";
+}
+
+function isRedeemedReward(status: string) {
+  return status.toLowerCase() === "redeemed";
+}
 
 type OwnerDashboardStatsData = {
   visitsToday: number;
@@ -125,8 +152,44 @@ function useOverlayModal() {
 }
 
 function OwnerHome() {
-  const { data, loading, error } = useQuery<OwnerDashboardQueryData>(OWNER_DASHBOARD);
-  const { data: customersData } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY);
+  const router = useRouter();
+  const client = useApolloClient();
+  const { ready, isAuthenticated, role } = useAuth();
+  const [pollMs, setPollMs] = useState(5000);
+
+  useEffect(() => {
+    const onVis = () => setPollMs(document.visibilityState === "visible" ? 5000 : 0);
+    onVis();
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  const { data, loading, error, networkStatus: dashboardNetworkStatus } = useQuery<OwnerDashboardQueryData>(
+    OWNER_DASHBOARD,
+    {
+    // Don't block dashboard query on missing role; let backend authorize.
+    skip: !ready || !isAuthenticated,
+    fetchPolicy: "network-only",
+    pollInterval: pollMs,
+    notifyOnNetworkStatusChange: true,
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    // Temporary debug logs
+    // eslint-disable-next-line no-console
+    console.log("LOADING:", loading);
+    // eslint-disable-next-line no-console
+    console.log("ERROR:", error);
+    // eslint-disable-next-line no-console
+    console.log("HOME DASHBOARD DATA:", data);
+  }
+  const { data: customersData, networkStatus: customersNetworkStatus } = useQuery<MyCustomersQueryData>(
+    MY_CUSTOMERS_QUERY,
+    {
+    fetchPolicy: "network-only",
+    pollInterval: pollMs,
+    notifyOnNetworkStatusChange: true,
+  });
   const [approveVisit] = useMutation<
     { approveVisit: { success: boolean; rewardUnlocked: boolean; rewardId?: number | null } },
     { visitId: number }
@@ -148,11 +211,13 @@ function OwnerHome() {
 
   const stats = data?.ownerDashboardStats;
   const pendingVisits = (stats?.pendingVisits ?? []).filter((v) => !approvedIds.includes(v.id));
-  // Prefer backend count; adjust locally as we approve (no refetch).
+  // Prefer list length so the card matches what the modal shows.
+  // (Backend `pendingCount` can lag behind `pendingVisits` in some responses.)
+  const pendingCountFromList = pendingVisits.length;
   const pendingCount =
     stats?.pendingCount != null
-      ? Math.max(0, stats.pendingCount - approvedIds.length)
-      : pendingVisits.length;
+      ? Math.max(pendingCountFromList, Math.max(0, stats.pendingCount - approvedIds.length))
+      : pendingCountFromList;
   const qrValue = "https://t.me/stamplyBot?start=business_1";
 
   useEffect(() => {
@@ -161,7 +226,129 @@ function OwnerHome() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  if (loading) return <div>Loading...</div>;
+  // Avoid "automatic loading" flashes during poll/refetch; only block on first load.
+  const initialLoading =
+    (dashboardNetworkStatus === NetworkStatus.loading && !data) ||
+    (customersNetworkStatus === NetworkStatus.loading && !customersData);
+
+  const recentActivity = stats?.recentActivity ?? [];
+  const customerNameById = new Map<number, string>(
+    (customersData?.myCustomers ?? []).map((c) => [
+      Number(c.id),
+      typeof c.name === "string" && c.name.trim() ? c.name : "Guest",
+    ]),
+  );
+  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "Guest";
+
+  const [rewardRows, setRewardRows] = useState<RewardRow[]>([]);
+  const [rewardsLoading, setRewardsLoading] = useState(false);
+
+  const todayRewardRows = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    return rewardRows.filter((r) => {
+      const iso = r.issuedAt ?? r.redeemedAt ?? null;
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return Number.isFinite(t) && t >= startMs;
+    });
+  }, [rewardRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const ids = (customersData?.myCustomers ?? [])
+        .map((c) => Number(c.id))
+        .filter((id) => Number.isFinite(id));
+
+      if (ids.length === 0) {
+        setRewardRows([]);
+        return;
+      }
+
+      setRewardsLoading(true);
+      try {
+        const results = await Promise.all(
+          ids.map((customerId) =>
+            client.query<CustomerDetailQueryResult>({
+              query: CUSTOMER_DETAIL_QUERY,
+              variables: { customerId },
+              fetchPolicy: "network-only",
+            }),
+          ),
+        );
+
+        if (cancelled) return;
+
+        const next: RewardRow[] = [];
+        for (const r of results) {
+          const detail = r.data?.customerDetail;
+          if (!detail) continue;
+          for (const rw of detail.rewards ?? []) {
+            next.push({
+              id: Number(rw.id),
+              customerId: Number(detail.id),
+              status: String(rw.status ?? ""),
+              issuedAt: rw.issuedAt ?? null,
+              redeemedAt: rw.redeemedAt ?? null,
+            });
+          }
+        }
+
+        next.sort((a, b) => {
+          const ta = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
+          const tb = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
+          return tb - ta;
+        });
+
+        setRewardRows(next);
+      } catch {
+        if (cancelled) return;
+        setRewardRows([]);
+      } finally {
+        if (!cancelled) setRewardsLoading(false);
+      }
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, customersData?.myCustomers]);
+
+  // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
+  if (!ready) return <div>Loading...</div>;
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-600">
+            Not authenticated. Please login in Telegram mini app.
+          </div>
+        </div>
+        <BottomNav currentKey="home" />
+      </div>
+    );
+  }
+
+  if (role && role !== "owner") {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-600">
+            Owner dashboard is available for owner accounts only.
+          </div>
+          <div className="mt-3 text-xs text-gray-400">Current role: {role ?? "—"}</div>
+        </div>
+        <BottomNav currentKey="home" />
+      </div>
+    );
+  }
+
+  if (initialLoading) return <div>Loading...</div>;
   if (error) {
     return (
       <div className="p-4 text-sm text-gray-500">
@@ -170,16 +357,6 @@ function OwnerHome() {
       </div>
     );
   }
-
-  const recentActivity = stats?.recentActivity ?? [];
-  const rewardEligible = (customersData?.myCustomers ?? []).filter((c) => (c.stampCount ?? 0) >= 8);
-  const customerNameById = new Map<number, string>(
-    (customersData?.myCustomers ?? []).map((c) => [
-      Number(c.id),
-      typeof c.name === "string" && c.name.trim() ? c.name : "Guest",
-    ]),
-  );
-  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "Guest";
   const formatActivityParts = (title: string) => {
     const customerId = parseCustomerIdFromActivityTitle(title);
     const name = customerId != null ? nameForCustomerId(customerId) : "Guest";
@@ -191,7 +368,10 @@ function OwnerHome() {
     if (loadingId === visitId) return;
     setLoadingId(visitId);
     try {
-      const res = await approveVisit({ variables: { visitId: Number(visitId) } });
+      const res = await approveVisit({
+        variables: { visitId: Number(visitId) },
+        refetchQueries: [{ query: OWNER_DASHBOARD }, { query: MY_CUSTOMERS_QUERY }],
+      });
       if (res.data?.approveVisit?.success !== true) {
         setLoadingId(null);
         setToast("Failed");
@@ -199,12 +379,17 @@ function OwnerHome() {
       }
 
       setLoadingId(null);
+      setToast(res.data?.approveVisit?.rewardUnlocked ? "Reward unlocked 🎉" : "Approved");
       setSuccessId(visitId);
+      if (res.data?.approveVisit?.rewardUnlocked) {
+        const rid = res.data.approveVisit.rewardId;
+        window.setTimeout(() => {
+          router.push(rid != null ? `/rewards?rewardId=${Number(rid)}` : "/rewards");
+        }, 250);
+      }
       window.setTimeout(() => {
         setApprovedIds((prev) => (prev.includes(visitId) ? prev : [...prev, visitId]));
         setSuccessId(null);
-        setToast("Approved");
-        alert("Approved");
       }, 450);
     } catch {
       setLoadingId(null);
@@ -385,9 +570,9 @@ function OwnerHome() {
                 Rewards
               </span>
               <span className="mt-2 block text-4xl font-black tracking-tight leading-none text-[#0077A3] tabular-nums">
-                {rewardEligible.length}
+                {todayRewardRows.length}
               </span>
-              <span className="mt-2 block text-sm text-gray-500">Total rewards issued</span>
+              <span className="mt-2 block text-sm text-gray-500">Today</span>
             </div>
             <div className="h-8 w-8 flex items-center justify-center text-[#0077A3]">
               <motion.span
@@ -409,25 +594,31 @@ function OwnerHome() {
           </div>
 
           <div className="border-t border-black/5 mt-3 pt-3">
-            {rewardEligible.slice(0, 2).length === 0 ? (
-              <div className="text-center text-gray-400 text-sm">No recent rewards</div>
+            {rewardsLoading ? (
+              <div className="text-center text-gray-400 text-sm">Loading...</div>
+            ) : todayRewardRows.slice(0, 2).length === 0 ? (
+              <div className="text-center text-gray-400 text-sm">No rewards today</div>
             ) : (
               <div className="space-y-2">
-                {rewardEligible.slice(0, 2).map((c) => (
-                  <div key={c.id} className="flex items-center justify-between gap-3">
+                {todayRewardRows.slice(0, 2).map((r) => {
+                  const redeemed = isRedeemedReward(r.status);
+                  const unlocked = isUnlockedReward(r.status);
+                  const label = redeemed ? "redeemed" : unlocked ? "unlocked" : "reward";
+                  return (
+                  <div key={r.id} className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#00AEEF]/10 text-sm font-semibold text-[#00AEEF]">
-                        {getInitials(nameForCustomerId(c.id))}
+                        {getInitials(nameForCustomerId(r.customerId))}
                       </div>
                       <div className="truncate text-sm font-semibold text-[#0F172A]">
-                        {nameForCustomerId(c.id)}
+                        {nameForCustomerId(r.customerId)}
                       </div>
                     </div>
                     <span className="shrink-0 rounded-full bg-[#00AEEF]/20 px-2 py-1 text-xs text-[#0077A3]">
-                      Eligible
+                      {label}
                     </span>
                   </div>
-                ))}
+                );})}
               </div>
             )}
           </div>
@@ -615,5 +806,9 @@ function OwnerHome() {
 }
 
 export default function Home() {
-  return <OwnerHome />;
+  return (
+    <RequireAuth>
+      <OwnerHome />
+    </RequireAuth>
+  );
 }

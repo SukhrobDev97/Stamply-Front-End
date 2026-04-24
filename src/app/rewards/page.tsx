@@ -1,13 +1,15 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { RequireAuth } from "@/components/common/require-auth";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
+import { useAuth } from "@/app/providers";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 type Customer = {
   id: number;
@@ -36,7 +38,7 @@ type CustomerDetailQueryResult = {
 
 function isUnlocked(status: string) {
   const s = status.toLowerCase();
-  return s === "unlocked" || s === "available";
+  return s === "available";
 }
 
 function isRedeemed(status: string) {
@@ -54,10 +56,15 @@ function formatListDate(iso: string | null | undefined) {
   }).format(d);
 }
 
-export default function RewardsPage() {
+function RewardsPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const client = useApolloClient();
-  const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY);
+  const { ready, isAuthenticated } = useAuth();
+  const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
+    fetchPolicy: "network-only",
+    skip: !ready || !isAuthenticated,
+  });
   const [redeemReward, { loading: redeeming }] = useMutation<
     { redeemReward: boolean },
     { rewardId: number }
@@ -73,9 +80,10 @@ export default function RewardsPage() {
   }, [data?.myCustomers]);
   const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "Guest";
 
-  const eligibleCustomerIds = useMemo(() => {
+  // Don't filter by `stampCount >= 8` here:
+  // after issuing a reward, many backends reset stamp count, which would hide rewards entirely.
+  const customerIds = useMemo(() => {
     return (data?.myCustomers ?? [])
-      .filter((c) => (c.stampCount ?? 0) >= 8)
       .map((c) => Number(c.id))
       .filter((id) => Number.isFinite(id));
   }, [data?.myCustomers]);
@@ -87,14 +95,14 @@ export default function RewardsPage() {
     let cancelled = false;
 
     async function run() {
-      if (eligibleCustomerIds.length === 0) {
+      if (customerIds.length === 0) {
         setRows([]);
         return;
       }
       setRowsLoading(true);
       try {
         const results = await Promise.all(
-          eligibleCustomerIds.map((customerId) =>
+          customerIds.map((customerId) =>
             client.query<CustomerDetailQueryResult>({
               query: CUSTOMER_DETAIL_QUERY,
               variables: { customerId },
@@ -144,7 +152,7 @@ export default function RewardsPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, eligibleCustomerIds]);
+  }, [client, customerIds]);
 
   const unlockedCount = rows.filter((r) => isUnlocked(r.status)).length;
 
@@ -162,6 +170,22 @@ export default function RewardsPage() {
       // keep simple (no new toasts)
     }
   };
+
+  const autoRedeemedRef = useRef<number | null>(null);
+  useEffect(() => {
+    const raw = searchParams?.get("rewardId");
+    const rewardId = raw ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(rewardId)) return;
+    if (autoRedeemedRef.current === rewardId) return;
+    if (loading || rowsLoading || redeeming) return;
+
+    const row = rows.find((r) => r.id === rewardId);
+    if (!row) return;
+    if (!isUnlocked(row.status)) return;
+
+    autoRedeemedRef.current = rewardId;
+    void onRedeem(rewardId);
+  }, [loading, rowsLoading, redeeming, rows, searchParams]);
 
   return (
     <div className="min-h-dvh bg-[#f7f7f8] text-black">
@@ -241,5 +265,26 @@ export default function RewardsPage() {
 
       <BottomNav currentKey="rewards" />
     </div>
+  );
+}
+
+export default function RewardsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-dvh bg-[#f7f7f8] text-black">
+          <div className="mx-auto max-w-md px-4 pt-3 pb-32">
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
+              Loading...
+            </div>
+          </div>
+          <BottomNav currentKey="rewards" />
+        </div>
+      }
+    >
+      <RequireAuth>
+        <RewardsPageInner />
+      </RequireAuth>
+    </Suspense>
   );
 }
