@@ -5,6 +5,9 @@ export const CREATE_BUSINESS = gql`
     createBusiness(input: $input) {
       id
       name
+      phone
+      address
+      businessType
     }
   }
 `;

@@ -4,6 +4,7 @@ import { ApolloProvider, useApolloClient } from "@apollo/client/react";
 import { useMutation } from "@apollo/client/react";
 import { apolloClient } from "@/lib/apollo/client";
 import { TELEGRAM_LOGIN_MUTATION } from "@/graphql/mutations/telegramLogin.mutation";
+import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import {
   createContext,
   useContext,
@@ -20,7 +21,7 @@ type AuthState = {
   role: string | null;
   userId: string | null;
   telegramId: string | null;
-  loginWithTelegram: () => Promise<void>;
+  loginWithTelegram: () => Promise<{ ok: true } | { ok: false; reason: string }>;
   logout: () => Promise<void>;
 };
 
@@ -71,10 +72,10 @@ function AuthGate({
     const initData = tg?.initData ?? "";
 
     console.log("TG INIT DATA:", initData);
+    console.log("SENDING LOGIN REQUEST");
 
     if (!initData) {
-      alert("Open inside Telegram");
-      return;
+      return { ok: false as const, reason: "OPEN_IN_TELEGRAM" };
     }
 
     try {
@@ -87,8 +88,7 @@ function AuthGate({
         | undefined;
 
       if (!token) {
-        alert("Login failed");
-        return;
+        return { ok: false as const, reason: "LOGIN_FAILED" };
       }
 
       const payload = decodeJwtPayload(token);
@@ -99,9 +99,23 @@ function AuthGate({
       setRole(typeof payload?.role === "string" ? payload.role : null);
       setUserId(payload?.sub != null ? String(payload.sub) : null);
       setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
+      // Ensure business context (profile) is fresh right after login.
+      try {
+        await client.query({ query: PROFILE_QUERY, fetchPolicy: "network-only" });
+      } catch {
+        // ignore; RequireAuth/profile validation will handle invalid sessions
+      }
+      console.log("TOKEN AFTER LOGIN:", localStorage.getItem("accessToken"));
+      return { ok: true as const };
     } catch (e) {
-      console.error("LOGIN ERROR:", e);
-      alert("Login failed");
+      console.log("LOGIN ERROR:", e);
+      console.log("GRAPHQL ERROR:", (e as any)?.graphQLErrors);
+      console.log("NETWORK ERROR:", (e as any)?.networkError);
+      const msg = (e as any)?.message ? String((e as any).message) : "LOGIN_FAILED";
+      return {
+        ok: false as const,
+        reason: msg.includes("USER_NOT_REGISTERED") ? "USER_NOT_REGISTERED" : msg,
+      };
     }
   };
 
@@ -122,10 +136,6 @@ function AuthGate({
     setUserId(null);
     setTelegramId(null);
     setReady(true);
-
-    if (typeof window !== "undefined") {
-      window.location.reload();
-    }
   };
 
   const authState: AuthState = useMemo(() => {
@@ -190,6 +200,20 @@ export function Providers({ children }: { children: ReactNode }) {
     setUserId(payload?.sub != null ? String(payload.sub) : null);
     setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
     setReady(true);
+  }, []);
+
+  useEffect(() => {
+    const onInvalid = async () => {
+      setAccessToken(null);
+      setIsAuthenticated(false);
+      setRole(null);
+      setUserId(null);
+      setTelegramId(null);
+      setReady(true);
+    };
+
+    window.addEventListener("stamply:session-invalidated", onInvalid);
+    return () => window.removeEventListener("stamply:session-invalidated", onInvalid);
   }, []);
 
   return (

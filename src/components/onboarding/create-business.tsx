@@ -16,8 +16,6 @@ export function CreateBusinessOnboarding() {
       await createBusiness({
         variables: { input: { name: trimmed } },
       });
-
-      window.location.reload();
     } catch (e) {
       alert("Failed to create business");
     }

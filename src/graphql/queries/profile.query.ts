@@ -13,6 +13,7 @@ export const PROFILE_QUERY = gql`
         name
         phone
         address
+        businessType
       }
     }
   }

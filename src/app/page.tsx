@@ -1,10 +1,12 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { Avatar } from "@/components/common/avatar";
 import { RequireAuth } from "@/components/common/require-auth";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
+import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { useAuth } from "@/app/providers";
 import { gql, NetworkStatus } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
@@ -70,6 +72,13 @@ type OwnerDashboardQueryData = {
   ownerDashboardStats: OwnerDashboardStatsData;
 };
 
+type ProfileQueryData = {
+  profile: {
+    avatar_url?: string | null;
+    business?: { id: number; name?: string | null; phone?: string | null; address?: string | null; businessType?: string | null } | null;
+  } | null;
+};
+
 type MyCustomersQueryData = {
   myCustomers: { id: number; name?: string | null; stampCount: number }[];
 };
@@ -99,6 +108,11 @@ function getInitials(name: string) {
   return parts.length === 1
     ? parts[0][0]
     : (parts[0][0] ?? "") + (parts[1][0] ?? "");
+}
+
+function getFirstLetter(value: string) {
+  const safe = (value ?? "").trim();
+  return safe ? safe[0]!.toUpperCase() : "";
 }
 
 function parseCustomerIdFromActivityTitle(title: string) {
@@ -154,7 +168,8 @@ function useOverlayModal() {
 function OwnerHome() {
   const router = useRouter();
   const client = useApolloClient();
-  const { ready, isAuthenticated, role } = useAuth();
+  const { ready, role } = useAuth();
+  const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
   const [pollMs, setPollMs] = useState(5000);
 
   useEffect(() => {
@@ -168,10 +183,15 @@ function OwnerHome() {
     OWNER_DASHBOARD,
     {
     // Don't block dashboard query on missing role; let backend authorize.
-    skip: !ready || !isAuthenticated,
+    skip: !ready || !token,
     fetchPolicy: "network-only",
     pollInterval: pollMs,
     notifyOnNetworkStatusChange: true,
+  });
+
+  const { data: profileData } = useQuery<ProfileQueryData>(PROFILE_QUERY, {
+    skip: !ready || !token,
+    fetchPolicy: "network-only",
   });
 
   if (process.env.NODE_ENV !== "production") {
@@ -181,7 +201,15 @@ function OwnerHome() {
     // eslint-disable-next-line no-console
     console.log("ERROR:", error);
     // eslint-disable-next-line no-console
+    console.log("ERROR.message:", error?.message);
+    // eslint-disable-next-line no-console
+    console.log("ERROR.graphQLErrors:", (error as any)?.graphQLErrors);
+    // eslint-disable-next-line no-console
+    console.log("ERROR.networkError:", (error as any)?.networkError);
+    // eslint-disable-next-line no-console
     console.log("HOME DASHBOARD DATA:", data);
+    // eslint-disable-next-line no-console
+    console.log("TOKEN:", typeof window !== "undefined" ? localStorage.getItem("accessToken") : null);
   }
   const { data: customersData, networkStatus: customersNetworkStatus } = useQuery<MyCustomersQueryData>(
     MY_CUSTOMERS_QUERY,
@@ -218,7 +246,18 @@ function OwnerHome() {
     stats?.pendingCount != null
       ? Math.max(pendingCountFromList, Math.max(0, stats.pendingCount - approvedIds.length))
       : pendingCountFromList;
-  const qrValue = "https://t.me/stamplyBot?start=business_1";
+  const businessId = profileData?.profile?.business?.id;
+  const businessName = profileData?.profile?.business?.name ?? "";
+  const businessPhone = profileData?.profile?.business?.phone ?? "";
+  const businessAddress = profileData?.profile?.business?.address ?? "";
+  const businessType = profileData?.profile?.business?.businessType ?? "";
+  const userAvatarUrlRaw = profileData?.profile?.avatar_url ?? null;
+  const userAvatarUrl =
+    typeof userAvatarUrlRaw === "string" && userAvatarUrlRaw.trim() ? userAvatarUrlRaw.trim() : null;
+  const qrValue =
+    businessId != null && Number.isFinite(Number(businessId))
+      ? `https://t.me/stamplyBot?start=business_${Number(businessId)}`
+      : "https://t.me/stamplyBot";
 
   useEffect(() => {
     if (!toast) return;
@@ -235,10 +274,10 @@ function OwnerHome() {
   const customerNameById = new Map<number, string>(
     (customersData?.myCustomers ?? []).map((c) => [
       Number(c.id),
-      typeof c.name === "string" && c.name.trim() ? c.name : "Guest",
+      typeof c.name === "string" && c.name.trim() ? c.name : "",
     ]),
   );
-  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "Guest";
+  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "";
 
   const [rewardRows, setRewardRows] = useState<RewardRow[]>([]);
   const [rewardsLoading, setRewardsLoading] = useState(false);
@@ -321,33 +360,6 @@ function OwnerHome() {
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
   if (!ready) return <div>Loading...</div>;
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
-          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-600">
-            Not authenticated. Please login in Telegram mini app.
-          </div>
-        </div>
-        <BottomNav currentKey="home" />
-      </div>
-    );
-  }
-
-  if (role && role !== "owner") {
-    return (
-      <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
-          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-600">
-            Owner dashboard is available for owner accounts only.
-          </div>
-          <div className="mt-3 text-xs text-gray-400">Current role: {role ?? "—"}</div>
-        </div>
-        <BottomNav currentKey="home" />
-      </div>
-    );
-  }
-
   if (initialLoading) return <div>Loading...</div>;
   if (error) {
     return (
@@ -359,7 +371,7 @@ function OwnerHome() {
   }
   const formatActivityParts = (title: string) => {
     const customerId = parseCustomerIdFromActivityTitle(title);
-    const name = customerId != null ? nameForCustomerId(customerId) : "Guest";
+    const name = customerId != null ? nameForCustomerId(customerId) : "";
     const action = stripCustomerPrefix(title);
     return { name, action: action || title };
   };
@@ -402,25 +414,12 @@ function OwnerHome() {
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-[#f7f7f8]/80 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            {(() => {
-              const avatarUrl: string | null = null;
-              const initials = "A";
-              return avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={avatarUrl}
-                  alt=""
-                  className="h-10 w-10 rounded-full object-cover"
-                />
-              ) : (
-                <div className="h-10 w-10 rounded-full bg-[#E6F4FA] flex items-center justify-center text-[#0284C7] font-semibold">
-                  {initials}
-                </div>
-              );
-            })()}
+            <Avatar src={userAvatarUrl} fallbackText={businessName || "Business"} size={40} className="text-base" />
             <div className="flex flex-col">
-              <div className="text-lg font-semibold text-[#0F172A] leading-tight">My Business</div>
-              <div className="text-xs text-gray-400">Business dashboard</div>
+              <div className="text-lg font-semibold text-[#0F172A] leading-tight">
+                {businessName || "—"}
+              </div>
+              <div className="text-xs text-gray-400">{businessType || "—"}</div>
             </div>
           </div>
 
@@ -533,17 +532,24 @@ function OwnerHome() {
           ) : (
             recentActivity.slice(0, 2).map((item) => {
               const parts = formatActivityParts(item?.title ?? "");
+              const initialsSource = parts.name || parts.action || "";
               return (
                 <div
                   key={String(item?.id)}
                   className="flex items-center gap-3 py-2.5 rounded-xl px-1 active:scale-95 transition-all duration-200 ease-out hover:bg-gray-50"
                 >
                   <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 bg-[#00AEEF]/10 text-[#00AEEF] border border-[#00AEEF]/20">
-                    {getInitials(parts.name)}
+                    {getFirstLetter(initialsSource)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate text-gray-900">{parts.name}</p>
-                    <p className="text-xs text-gray-400">{parts.action}</p>
+                    {parts.name ? (
+                      <>
+                        <p className="text-sm font-semibold truncate text-gray-900">{parts.name}</p>
+                        <p className="text-xs text-gray-400">{parts.action}</p>
+                      </>
+                    ) : (
+                      <p className="text-sm font-semibold truncate text-gray-900">{parts.action}</p>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <span className="text-xs font-medium text-gray-400">
@@ -730,27 +736,35 @@ function OwnerHome() {
                   No activity yet
                 </div>
               ) : (
-                recentActivity.map((item) => (
-                  <div
-                    key={String(item?.id)}
-                    className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-gray-50"
-                  >
-                    <div className="h-8 w-8 shrink-0 rounded-full bg-[#00AEEF]/10 text-[#00AEEF] flex items-center justify-center text-sm font-semibold">
-                      {getInitials(formatActivityParts(item?.title ?? "").name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-gray-500">
-                        <span className="font-semibold text-gray-900">
-                          {formatActivityParts(item?.title ?? "").name}
-                        </span>{" "}
-                        <span className="text-gray-500">{formatActivityParts(item?.title ?? "").action}</span>
+                recentActivity.map((item) => {
+                  const parts = formatActivityParts(item?.title ?? "");
+                  const letterSource = parts.name || parts.action || "";
+                  return (
+                    <div
+                      key={String(item?.id)}
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-gray-50"
+                    >
+                      <div className="h-8 w-8 shrink-0 rounded-full bg-[#00AEEF]/10 text-[#00AEEF] flex items-center justify-center text-sm font-semibold">
+                        {getFirstLetter(letterSource)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        {parts.name ? (
+                          <div className="truncate text-sm text-gray-500">
+                            <span className="font-semibold text-gray-900">{parts.name}</span>{" "}
+                            <span className="text-gray-500">{parts.action}</span>
+                          </div>
+                        ) : (
+                          <div className="truncate text-sm text-gray-500">
+                            <span className="font-semibold text-gray-900">{parts.action}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-xs text-gray-400">
+                        {item?.createdAt ? formatTime(item.createdAt) : ""}
                       </div>
                     </div>
-                    <div className="shrink-0 text-xs text-gray-400">
-                      {item?.createdAt ? formatTime(item.createdAt) : ""}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

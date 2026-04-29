@@ -1,7 +1,11 @@
 "use client";
 
 import { useAuth } from "@/app/providers";
-import { MessageCircle, ShieldCheck } from "lucide-react";
+import { apolloClient } from "@/lib/apollo/client";
+import { CREATE_BUSINESS } from "@/graphql/mutations/createBusiness";
+import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { useMutation, useQuery } from "@apollo/client/react";
+import { Building2, MessageCircle, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function RequireAuth({
@@ -9,23 +13,58 @@ export function RequireAuth({
 }: {
   children: React.ReactNode;
 }) {
-  const { ready, isAuthenticated, loginWithTelegram } = useAuth();
+  const { ready, loginWithTelegram } = useAuth();
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
   const prevAuthedRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [loginMsg, setLoginMsg] = useState<string | null>(null);
+  const [langSheetOpen, setLangSheetOpen] = useState(false);
+  const [lang, setLang] = useState<"uz" | "ru">("uz");
+
+  const [bizName, setBizName] = useState("");
+  const [bizPhone, setBizPhone] = useState("");
+  const [bizAddress, setBizAddress] = useState("");
+  const [bizType, setBizType] = useState("");
+  const [registerMsg, setRegisterMsg] = useState<string | null>(null);
+  const [createBusiness, { loading: creatingBusiness }] = useMutation(CREATE_BUSINESS);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!ready) return;
     try {
-      console.log("TOKEN:", localStorage.getItem("accessToken"));
+      const v = localStorage.getItem("lang");
+      if (v === "ru" || v === "uz") setLang(v);
     } catch {
       // ignore
     }
-  }, [ready]);
+  }, []);
+
+  // Server validation: profile must load successfully for token to be considered valid.
+  const { loading: validating, error: profileError, data: profileData } = useQuery(PROFILE_QUERY, {
+    skip: !ready || !token,
+    fetchPolicy: "network-only",
+  });
 
   useEffect(() => {
     if (!ready) return;
-    const authedNow = !!isAuthenticated && !!token;
+    if (!token) return;
+    if (!profileError) return;
+    // Force global session reset (no reload loops).
+    try {
+      localStorage.removeItem("accessToken");
+    } catch {
+      // ignore
+    }
+    void apolloClient.clearStore();
+    try {
+      window.dispatchEvent(new Event("stamply:session-invalidated"));
+    } catch {
+      // ignore
+    }
+  }, [profileError, ready, token]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const authedNow = !!token && !profileError && !validating;
     prevAuthedRef.current = authedNow;
     if (!authedNow) return;
 
@@ -43,7 +82,7 @@ export function RequireAuth({
     setToast("Welcome back 👋");
     const t = window.setTimeout(() => setToast(null), 1400);
     return () => window.clearTimeout(t);
-  }, [isAuthenticated, ready, token]);
+  }, [ready, token, profileError, validating]);
 
   if (!ready) {
     return (
@@ -58,10 +97,23 @@ export function RequireAuth({
     );
   }
 
-  if (!isAuthenticated || !token) {
+  if (!token) {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-4 pb-24 pt-6">
+        <div className="mx-auto min-h-dvh max-w-md px-4 pb-24 pt-6">
+          <div className="mb-6 flex items-center justify-between">
+            <div />
+            <button
+              type="button"
+              onClick={() => setLangSheetOpen(true)}
+              className="px-4 py-2 rounded-full bg-[#0284C7] text-sm font-semibold text-white shadow-sm active:opacity-90"
+              aria-label="Language"
+            >
+              {lang === "ru" ? "🇷🇺 RU" : "🇺🇿 UZ"}
+            </button>
+          </div>
+
+          <div className="grid place-items-center">
           <div className="w-full rounded-[28px] border border-black/5 bg-white p-6 text-center shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#00AEEF]/10 text-[#0077A3]">
               <ShieldCheck className="h-7 w-7" aria-hidden />
@@ -70,13 +122,233 @@ export function RequireAuth({
             <div className="mt-4 text-lg font-semibold text-[#0F172A]">Welcome to Stamply</div>
             <div className="mt-1 text-sm text-gray-500">Login to continue</div>
 
+            {loginMsg ? <div className="mt-4 text-sm text-gray-600">{loginMsg}</div> : null}
+
             <button
               type="button"
-              onClick={() => void loginWithTelegram()}
-              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3 text-sm font-semibold text-white transition active:scale-[0.99]"
+              onClick={() => {
+                setLoginMsg(null);
+                void (async () => {
+                  const res = await loginWithTelegram();
+                  if (res.ok) return;
+                  if (res.reason === "OPEN_IN_TELEGRAM") {
+                    setLoginMsg("Open inside Telegram to continue.");
+                    return;
+                  }
+                  if (res.reason === "USER_NOT_REGISTERED") {
+                    // Telegram-first: user must login first; backend should ideally not return this anymore.
+                    setLoginMsg("Login failed. Please try again.");
+                    return;
+                  }
+                  setLoginMsg("Login failed. Please try again.");
+                })();
+              }}
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3.5 text-sm font-semibold text-white transition active:scale-[0.99]"
             >
               <MessageCircle className="h-4 w-4" aria-hidden />
               Continue with Telegram
+            </button>
+
+            <div className="mt-4 text-xs text-gray-400">
+              By continuing, you agree to use Telegram authentication.
+            </div>
+          </div>
+          </div>
+
+          {langSheetOpen ? (
+            <div className="fixed inset-0 z-50 bg-black/40 px-4" onClick={() => setLangSheetOpen(false)}>
+              <div className="mx-auto max-w-md" onClick={(e) => e.stopPropagation()}>
+                <div className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-[28px] border border-gray-200 bg-white p-4 shadow-[0_-12px_40px_rgba(0,0,0,0.12)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-base font-semibold text-gray-900">Language</div>
+                    <button
+                      type="button"
+                      className="text-sm font-semibold text-gray-500"
+                      onClick={() => setLangSheetOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLang("uz");
+                        try {
+                          localStorage.setItem("lang", "uz");
+                        } catch {
+                          // ignore
+                        }
+                        setLangSheetOpen(false);
+                      }}
+                      className={[
+                        "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
+                        lang === "uz" ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]" : "border-gray-200 bg-white text-gray-900",
+                      ].join(" ")}
+                    >
+                      🇺🇿 Uzbek
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLang("ru");
+                        try {
+                          localStorage.setItem("lang", "ru");
+                        } catch {
+                          // ignore
+                        }
+                        setLangSheetOpen(false);
+                      }}
+                      className={[
+                        "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
+                        lang === "ru" ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]" : "border-gray-200 bg-white text-gray-900",
+                      ].join(" ")}
+                    >
+                      🇷🇺 Russian
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (validating) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="h-6 w-48 rounded-lg bg-gray-100" />
+            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (creating) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="text-sm font-semibold text-gray-900">Creating business…</div>
+            <div className="mt-2 text-sm text-gray-500">Finalizing setup. Please wait.</div>
+            <div className="mt-4 h-10 rounded-xl bg-gray-100" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If profile failed to load, session invalidation effect will run.
+  // Do NOT render app or business form while invalidating.
+  if (profileError) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="h-6 w-48 rounded-lg bg-gray-100" />
+            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // While profileData is not present yet, do not render UI.
+  if (!profileData) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="h-6 w-48 rounded-lg bg-gray-100" />
+            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const business = (profileData as any)?.profile?.business ?? null;
+  if (!business) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-4 pb-24 pt-6">
+          <div className="w-full rounded-[28px] border border-black/5 bg-white p-6 text-center shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#00AEEF]/10 text-[#0077A3]">
+              <Building2 className="h-7 w-7" aria-hidden />
+            </div>
+            <div className="mt-4 text-lg font-semibold text-[#0F172A]">Create your business</div>
+            <div className="mt-1 text-sm text-gray-500">
+              This is the information your customers will see
+            </div>
+
+            <div className="mt-4 space-y-2 text-left">
+              <input
+                value={bizName}
+                onChange={(e) => setBizName(e.target.value)}
+                placeholder="Business Name *"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+              <input
+                value={bizPhone}
+                onChange={(e) => setBizPhone(e.target.value)}
+                placeholder="Phone *"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+              <input
+                value={bizAddress}
+                onChange={(e) => setBizAddress(e.target.value)}
+                placeholder="Address (optional)"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+              <input
+                value={bizType}
+                onChange={(e) => setBizType(e.target.value)}
+                placeholder="Business Type (optional)"
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+              />
+            </div>
+
+            {registerMsg ? <div className="mt-3 text-sm text-gray-600">{registerMsg}</div> : null}
+
+            <button
+              type="button"
+              disabled={creatingBusiness || !bizName.trim() || !bizPhone.trim()}
+              onClick={() => {
+                setRegisterMsg(null);
+                void (async () => {
+                  setCreating(true);
+                  try {
+                    await createBusiness({
+                      variables: {
+                        input: {
+                          name: bizName.trim(),
+                          phone: bizPhone.trim(),
+                          address: bizAddress.trim() || null,
+                          businessType: bizType.trim()
+                            ? bizType.trim().toUpperCase().replace(/\s+/g, "_")
+                            : null,
+                        },
+                      },
+                      refetchQueries: [{ query: PROFILE_QUERY }],
+                      awaitRefetchQueries: true,
+                    });
+                    setRegisterMsg(null);
+                  } catch {
+                    setRegisterMsg("Failed to create business. Please try again.");
+                  } finally {
+                    setCreating(false);
+                  }
+                })();
+              }}
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3 text-sm font-semibold text-white transition disabled:opacity-50 active:scale-[0.99]"
+            >
+              {creatingBusiness ? "Creating..." : "Create Business"}
             </button>
           </div>
         </div>
