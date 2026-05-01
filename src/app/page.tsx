@@ -2,19 +2,22 @@
 
 import { BottomNav } from "@/components/common/bottom-nav";
 import { Avatar } from "@/components/common/avatar";
+import { PremiumDashboardLoader } from "@/components/common/premium-dashboard-loader";
 import { RequireAuth } from "@/components/common/require-auth";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { useAuth } from "@/app/providers";
+import { t, type ProfileLang } from "@/app/profile/copy";
+import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { gql, NetworkStatus } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import { Activity, Clock, Loader2, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 type PendingVisit = {
@@ -102,14 +105,6 @@ function formatTime(input: string | number | Date) {
   }).format(d);
 }
 
-function getInitials(name: string) {
-  if (!name) return "G";
-  const parts = name.split(" ").filter(Boolean);
-  return parts.length === 1
-    ? parts[0][0]
-    : (parts[0][0] ?? "") + (parts[1][0] ?? "");
-}
-
 function getFirstLetter(value: string) {
   const safe = (value ?? "").trim();
   return safe ? safe[0]!.toUpperCase() : "";
@@ -127,6 +122,29 @@ function stripCustomerPrefix(title: string) {
     .replace(/^[:\-–—>]+/, "")
     .replace(/^\s*(?:→|:|-|–|—)\s*/, "")
     .trim();
+}
+
+function translateActivityDescription(raw: string, txt: (typeof t)[ProfileLang]): string {
+  const normalized = raw.trim().replace(/\s+/g, " ");
+  const key = normalized.toLowerCase().replace(/[.!…]+$/u, "");
+  if (!key) return raw;
+  const exact: Record<string, string> = {
+    "stamp added": txt.activityStampAdded,
+    "stamps added": txt.activityStampsAdded,
+    "reward unlocked": txt.activityRewardUnlocked,
+    "reward redeemed": txt.activityRewardRedeemed,
+    "visit approved": txt.activityVisitApproved,
+    "visit recorded": txt.activityVisitRecorded,
+    "reward issued": txt.activityRewardIssued,
+    "approved visit": txt.activityVisitApproved,
+    "pending visit approved": txt.activityVisitApproved,
+  };
+  if (exact[key]) return exact[key];
+  if (key.includes("reward") && key.includes("unlock")) return txt.activityRewardUnlocked;
+  if (key.includes("reward") && key.includes("redeem")) return txt.activityRewardRedeemed;
+  if (key.includes("stamp")) return txt.activityStampAdded;
+  if (key.includes("visit") && key.includes("approv")) return txt.activityVisitApproved;
+  return raw;
 }
 
 type OverlayPhase = "closed" | "enter" | "visible" | "exit";
@@ -179,6 +197,37 @@ function OwnerHome() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
+  const [lang, setLang] = useState<ProfileLang>("uz");
+
+  useEffect(() => {
+    const apply = () => {
+      try {
+        const v = localStorage.getItem("lang");
+        if (v === "ru" || v === "uz") setLang(v);
+      } catch {
+        // ignore
+      }
+    };
+    apply();
+    window.addEventListener(STAMPLY_LANG_CHANGED, apply);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "lang") apply();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(STAMPLY_LANG_CHANGED, apply);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  const setLangPersist = useCallback((next: ProfileLang) => {
+    setStoredLang(next);
+  }, []);
+
+  const txt = t[lang];
+  const txtRef = useRef(txt);
+  txtRef.current = txt;
+
   const { data, loading, error, networkStatus: dashboardNetworkStatus } = useQuery<OwnerDashboardQueryData>(
     OWNER_DASHBOARD,
     {
@@ -194,23 +243,6 @@ function OwnerHome() {
     fetchPolicy: "network-only",
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    // Temporary debug logs
-    // eslint-disable-next-line no-console
-    console.log("LOADING:", loading);
-    // eslint-disable-next-line no-console
-    console.log("ERROR:", error);
-    // eslint-disable-next-line no-console
-    console.log("ERROR.message:", error?.message);
-    // eslint-disable-next-line no-console
-    console.log("ERROR.graphQLErrors:", (error as any)?.graphQLErrors);
-    // eslint-disable-next-line no-console
-    console.log("ERROR.networkError:", (error as any)?.networkError);
-    // eslint-disable-next-line no-console
-    console.log("HOME DASHBOARD DATA:", data);
-    // eslint-disable-next-line no-console
-    console.log("TOKEN:", typeof window !== "undefined" ? localStorage.getItem("accessToken") : null);
-  }
   const { data: customersData, networkStatus: customersNetworkStatus } = useQuery<MyCustomersQueryData>(
     MY_CUSTOMERS_QUERY,
     {
@@ -223,8 +255,8 @@ function OwnerHome() {
     { visitId: number }
   >(APPROVE_VISIT_MUTATION, {
     onError: (e) => {
-      // Surface the real GraphQL/network error (helps debug prod).
-      const msg = e?.message ? `Failed: ${e.message}` : "Failed";
+      const cur = txtRef.current;
+      const msg = e?.message ? `${cur.homeApproveError}: ${e.message}` : cur.homeFailed;
       console.error("approveVisit error:", e);
       setToast(msg);
     },
@@ -261,14 +293,38 @@ function OwnerHome() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 1500);
-    return () => clearTimeout(t);
+    const timer = window.setTimeout(() => setToast(null), 1500);
+    return () => window.clearTimeout(timer);
   }, [toast]);
 
   // Avoid "automatic loading" flashes during poll/refetch; only block on first load.
   const initialLoading =
     (dashboardNetworkStatus === NetworkStatus.loading && !data) ||
     (customersNetworkStatus === NetworkStatus.loading && !customersData);
+
+  const dashboardBlocking = !ready || initialLoading;
+  const showDashboardOverlay = dashboardBlocking && !error;
+  const [loadOverlayMounted, setLoadOverlayMounted] = useState(true);
+  const [loadOverlayFadeOut, setLoadOverlayFadeOut] = useState(false);
+
+  useEffect(() => {
+    if (showDashboardOverlay) {
+      setLoadOverlayMounted(true);
+      setLoadOverlayFadeOut(false);
+      return;
+    }
+    if (error) {
+      setLoadOverlayMounted(false);
+      setLoadOverlayFadeOut(false);
+      return;
+    }
+    setLoadOverlayFadeOut(true);
+    const t = window.setTimeout(() => {
+      setLoadOverlayMounted(false);
+      setLoadOverlayFadeOut(false);
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [showDashboardOverlay, error]);
 
   const recentActivity = stats?.recentActivity ?? [];
   const customerNameById = new Map<number, string>(
@@ -358,13 +414,10 @@ function OwnerHome() {
   }, [client, customersData?.myCustomers]);
 
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
-  if (!ready) return <div>Loading...</div>;
-
-  if (initialLoading) return <div>Loading...</div>;
   if (error) {
     return (
       <div className="p-4 text-sm text-gray-500">
-        Failed to load dashboard
+        {txt.homeFailedDashboard}
         {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
       </div>
     );
@@ -372,8 +425,10 @@ function OwnerHome() {
   const formatActivityParts = (title: string) => {
     const customerId = parseCustomerIdFromActivityTitle(title);
     const name = customerId != null ? nameForCustomerId(customerId) : "";
-    const action = stripCustomerPrefix(title);
-    return { name, action: action || title };
+    const rawAction = stripCustomerPrefix(title);
+    const base = rawAction || title;
+    const action = translateActivityDescription(base, txt);
+    return { name, action };
   };
 
   const onApprove = async (visitId: number) => {
@@ -386,12 +441,12 @@ function OwnerHome() {
       });
       if (res.data?.approveVisit?.success !== true) {
         setLoadingId(null);
-        setToast("Failed");
+        setToast(txt.homeFailed);
         return;
       }
 
       setLoadingId(null);
-      setToast(res.data?.approveVisit?.rewardUnlocked ? "Reward unlocked 🎉" : "Approved");
+      setToast(res.data?.approveVisit?.rewardUnlocked ? txt.homeRewardUnlockedToast : txt.homeApproved);
       setSuccessId(visitId);
       if (res.data?.approveVisit?.rewardUnlocked) {
         const rid = res.data.approveVisit.rewardId;
@@ -405,7 +460,7 @@ function OwnerHome() {
       }, 450);
     } catch {
       setLoadingId(null);
-      setToast("Failed");
+      setToast(txt.homeFailed);
     }
   };
 
@@ -424,12 +479,28 @@ function OwnerHome() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-full bg-gray-100 text-xs font-medium text-gray-600 active:opacity-90"
-            >
-              UZ
-            </button>
+            <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setLangPersist("uz")}
+                className={[
+                  "rounded-full px-3 py-1.5 transition-colors",
+                  lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+                ].join(" ")}
+              >
+                UZ
+              </button>
+              <button
+                type="button"
+                onClick={() => setLangPersist("ru")}
+                className={[
+                  "rounded-full px-3 py-1.5 transition-colors",
+                  lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+                ].join(" ")}
+              >
+                RU
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => qrModal.open()}
@@ -455,7 +526,7 @@ function OwnerHome() {
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold tracking-widest uppercase text-gray-400">
-                Pending
+                {txt.homePending}
               </span>
               <span className="h-8 w-8 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500">
                 🕐
@@ -480,7 +551,7 @@ function OwnerHome() {
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold tracking-widest uppercase text-gray-400">
-                Customers
+                {txt.homeCustomers}
               </span>
               <span className="h-8 w-8 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500">
                 👥
@@ -496,18 +567,18 @@ function OwnerHome() {
           href="/visits"
           className={[
             "rounded-2xl p-4 flex flex-col gap-2 active:scale-95 transition-all duration-200 ease-out",
-            "border border-black/5 bg-[#00AEEF]/10 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
+            "border border-[#ff7034]/20 bg-[#ff7034] shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
           ].join(" ")}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold tracking-widest uppercase text-[#00AEEF]">
-              Visits Today
+            <span className="text-xs font-semibold tracking-widest uppercase text-white/90">
+              {txt.homeVisitsToday}
             </span>
-            <span className="h-8 w-8 flex items-center justify-center rounded-xl bg-[#00AEEF]/15 text-[#0077A3]">
+            <span className="h-8 w-8 flex items-center justify-center rounded-xl bg-white/20 text-white">
               📈
             </span>
           </div>
-          <span className="text-4xl font-black tracking-tight leading-none text-[#0077A3] tabular-nums">
+          <span className="text-4xl font-black tracking-tight leading-none text-white tabular-nums">
             {Number(stats?.visitsToday ?? 0)}
           </span>
         </Link>
@@ -522,13 +593,13 @@ function OwnerHome() {
           ].join(" ")}
         >
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-extrabold text-gray-900">Recent Activity</h2>
+            <h2 className="text-sm font-extrabold text-gray-900">{txt.homeRecentActivity}</h2>
             <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-[#00AEEF]/10 text-[#0077A3]">
-              Today
+              {txt.homeToday}
             </span>
           </div>
           {recentActivity.length === 0 ? (
-            <div className="text-sm text-gray-500">No activity yet</div>
+            <div className="text-sm text-gray-500">{txt.homeNoActivity}</div>
           ) : (
             recentActivity.slice(0, 2).map((item) => {
               const parts = formatActivityParts(item?.title ?? "");
@@ -567,20 +638,20 @@ function OwnerHome() {
           href="/rewards"
           className={[
             "mt-3 rounded-2xl p-4 flex flex-col gap-2 active:scale-95 transition-all duration-200 ease-out",
-            "border border-black/5 bg-[#00AEEF]/10 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
+            "border border-[#0284C7]/20 bg-[#0284C7] shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
           ].join(" ")}
         >
           <div className="flex items-start justify-between">
             <div>
-              <span className="text-xs font-semibold tracking-widest uppercase text-[#0077A3]">
-                Rewards
+              <span className="text-xs font-semibold tracking-widest uppercase text-white/90">
+                {txt.homeRewards}
               </span>
-              <span className="mt-2 block text-4xl font-black tracking-tight leading-none text-[#0077A3] tabular-nums">
+              <span className="mt-2 block text-4xl font-black tracking-tight leading-none text-white tabular-nums">
                 {todayRewardRows.length}
               </span>
-              <span className="mt-2 block text-sm text-gray-500">Today</span>
+              <span className="mt-2 block text-sm text-white/80">{txt.homeToday}</span>
             </div>
-            <div className="h-8 w-8 flex items-center justify-center text-[#0077A3]">
+            <div className="h-8 w-8 flex items-center justify-center text-white">
               <motion.span
                 className="select-none text-4xl leading-none"
                 animate={{
@@ -599,28 +670,33 @@ function OwnerHome() {
             </div>
           </div>
 
-          <div className="border-t border-black/5 mt-3 pt-3">
+          <div className="border-t border-white/20 mt-3 pt-3">
             {rewardsLoading ? (
-              <div className="text-center text-gray-400 text-sm">Loading...</div>
+              <div className="text-center text-white/70 text-sm">{txt.homeLoadingRewards}</div>
             ) : todayRewardRows.slice(0, 2).length === 0 ? (
-              <div className="text-center text-gray-400 text-sm">No rewards today</div>
+              <div className="text-center text-white/70 text-sm">{txt.homeNoRewardsToday}</div>
             ) : (
               <div className="space-y-2">
                 {todayRewardRows.slice(0, 2).map((r) => {
                   const redeemed = isRedeemedReward(r.status);
                   const unlocked = isUnlockedReward(r.status);
-                  const label = redeemed ? "redeemed" : unlocked ? "unlocked" : "reward";
+                  const label = redeemed
+                    ? txt.homeRewardRedeemed
+                    : unlocked
+                      ? txt.homeRewardUnlocked
+                      : txt.homeRewardOther;
+                  const custName = nameForCustomerId(r.customerId) || txt.userFallback;
                   return (
                   <div key={r.id} className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#00AEEF]/10 text-sm font-semibold text-[#00AEEF]">
-                        {getInitials(nameForCustomerId(r.customerId))}
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-sm font-semibold text-white">
+                        {getFirstLetter(custName)}
                       </div>
-                      <div className="truncate text-sm font-semibold text-[#0F172A]">
-                        {nameForCustomerId(r.customerId)}
+                      <div className="truncate text-sm font-semibold text-white">
+                        {custName}
                       </div>
                     </div>
-                    <span className="shrink-0 rounded-full bg-[#00AEEF]/20 px-2 py-1 text-xs text-[#0077A3]">
+                    <span className="shrink-0 rounded-full bg-white/20 px-2 py-1 text-xs text-white">
                       {label}
                     </span>
                   </div>
@@ -646,20 +722,20 @@ function OwnerHome() {
             ].join(" ")}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-black">Pending Requests</div>
+              <div className="text-sm font-semibold text-black">{txt.homePendingRequests}</div>
               <button
                 type="button"
                 onClick={() => pendingModal.close()}
                 className="text-xs font-semibold text-gray-500 hover:text-black"
               >
-                Close
+                {txt.homeClose}
               </button>
             </div>
 
             <div className="mt-4 space-y-2">
               {pendingVisits.length === 0 ? (
                 <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-                  No pending requests
+                  {txt.homeNoPending}
                 </div>
               ) : (
                 pendingVisits.map((v) => (
@@ -670,7 +746,7 @@ function OwnerHome() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-base font-semibold text-gray-900">
-                          {nameForCustomerId(v.customerId)}
+                          {nameForCustomerId(v.customerId) || txt.userFallback}
                         </div>
                         <div className="mt-1 text-xs text-gray-500">
                           {v.visitTime ? formatTime(v.visitTime) : ""}
@@ -690,12 +766,12 @@ function OwnerHome() {
                         {loadingId === v.id ? (
                           <span className="flex items-center justify-center gap-1">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                            <span className="sr-only">Loading</span>
+                            <span className="sr-only">{txt.homeLoadingAria}</span>
                           </span>
                         ) : successId === v.id ? (
-                          "Done"
+                          txt.homeDone
                         ) : (
-                          "Approve"
+                          txt.homeApprove
                         )}
                       </button>
                     </div>
@@ -720,20 +796,20 @@ function OwnerHome() {
             ].join(" ")}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-black">Recent Activity</div>
+              <div className="text-sm font-semibold text-black">{txt.homeRecentActivity}</div>
               <button
                 type="button"
                 onClick={() => activityModal.close()}
                 className="text-xs font-semibold text-gray-500 hover:text-black"
               >
-                Close
+                {txt.homeClose}
               </button>
             </div>
 
             <div className="mt-4 space-y-2">
               {recentActivity.length === 0 ? (
                 <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-                  No activity yet
+                  {txt.homeNoActivity}
                 </div>
               ) : (
                 recentActivity.map((item) => {
@@ -783,7 +859,7 @@ function OwnerHome() {
               qrModal.panelOpenClassName,
             ].join(" ")}
           >
-            <h2 className="mb-4 text-sm font-semibold text-black">Scan QR</h2>
+            <h2 className="mb-4 text-sm font-semibold text-black">{txt.homeScanQr}</h2>
 
             <div id="qr" className="flex justify-center">
               <QRCodeCanvas value={qrValue} size={200} />
@@ -802,7 +878,7 @@ function OwnerHome() {
               }}
               className="mt-4 w-full rounded-xl bg-black py-3 text-sm font-semibold text-white"
             >
-              Download
+              {txt.homeDownload}
             </button>
 
             <button
@@ -810,10 +886,14 @@ function OwnerHome() {
               onClick={() => qrModal.close()}
               className="mt-2 w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-black"
             >
-              Close
+              {txt.homeClose}
             </button>
           </div>
         </div>
+      ) : null}
+
+      {loadOverlayMounted ? (
+        <PremiumDashboardLoader fading={loadOverlayFadeOut} hint={txt.homeDashboardLoadHint} />
       ) : null}
     </div>
   );

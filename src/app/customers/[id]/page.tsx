@@ -6,6 +6,9 @@ import { GIVE_VISIT_MUTATION } from "@/graphql/mutations/giveVisit.mutation";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { useAuth } from "@/app/providers";
+import type { ProfileLang } from "@/app/profile/copy";
+import { t } from "@/app/profile/copy";
+import { useAppLang } from "@/lib/use-app-lang";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -62,13 +65,13 @@ function formatVisitWhen(iso: string) {
   }).format(d);
 }
 
-function rewardBadgeLabel(status: string): string {
+function rewardBadgeLabel(status: string, txt: (typeof t)[ProfileLang]): string {
   const s = status.toLowerCase();
-  if (s === "available") return "AVAILABLE";
-  if (s === "redeemed") return "REDEEMED";
-  if (s === "expired") return "EXPIRED";
-  if (s === "cancelled") return "CANCELLED";
-  return status.toUpperCase();
+  if (s === "available") return txt.homeRewardUnlocked;
+  if (s === "redeemed") return txt.homeRewardRedeemed;
+  if (s === "expired") return txt.customerRewardExpired;
+  if (s === "cancelled") return txt.customerRewardCancelled;
+  return status;
 }
 
 function rewardBadgeClass(status: string): string {
@@ -82,6 +85,7 @@ function rewardBadgeClass(status: string): string {
 
 export default function CustomerDetailPage() {
   const router = useRouter();
+  const { txt } = useAppLang();
   const params = useParams();
   const rawId = params?.id;
   const idStr = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -107,8 +111,8 @@ export default function CustomerDetailPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 1500);
-    return () => clearTimeout(t);
+    const toastTimer = window.setTimeout(() => setToast(null), 1500);
+    return () => window.clearTimeout(toastTimer);
   }, [toast]);
 
   const detail = data?.customerDetail;
@@ -147,12 +151,12 @@ export default function CustomerDetailPage() {
         router.push(rid != null ? `/rewards?rewardId=${Number(rid)}` : "/rewards");
         return;
       } else {
-        setToast("Stamp added");
+        setToast(txt.visitsStampAdded);
       }
 
       await refetch();
     } catch {
-      setToast("Failed");
+      setToast(txt.homeFailed);
     }
   };
 
@@ -164,14 +168,14 @@ export default function CustomerDetailPage() {
         refetchQueries: [{ query: CUSTOMER_DETAIL_QUERY, variables: { customerId } }],
       });
       if (res.data?.redeemReward !== true) {
-        setToast("Failed");
+        setToast(txt.homeFailed);
         return;
       }
       setRewardModal(null);
-      setToast("Reward given");
+      setToast(txt.visitsRewardGiven);
       await refetch();
     } catch {
-      setToast("Failed");
+      setToast(txt.homeFailed);
     }
   };
 
@@ -179,9 +183,9 @@ export default function CustomerDetailPage() {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pb-32 pt-8">
-          <p className="text-sm text-gray-500">Invalid customer</p>
+          <p className="text-sm text-gray-500">{txt.customerDetailInvalid}</p>
           <Link href="/customers" className="mt-4 inline-block text-sm font-medium text-black">
-            ← Back to customers
+            {txt.customerDetailBack}
           </Link>
         </div>
         <BottomNav currentKey="users" />
@@ -192,7 +196,7 @@ export default function CustomerDetailPage() {
   if (loading) {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto max-w-md px-4 pb-32 pt-8 text-sm text-gray-500">Loading…</div>
+        <div className="mx-auto max-w-md px-4 pb-32 pt-8 text-sm text-gray-500">{txt.homeLoading}</div>
         <BottomNav currentKey="users" />
       </div>
     );
@@ -202,9 +206,9 @@ export default function CustomerDetailPage() {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pb-32 pt-8">
-          <p className="text-sm text-gray-500">Could not load customer</p>
+          <p className="text-sm text-gray-500">{txt.customerDetailLoadError}</p>
           <Link href="/customers" className="mt-6 inline-block text-sm font-medium text-black">
-            ← Back to customers
+            {txt.customerDetailBack}
           </Link>
         </div>
         <BottomNav currentKey="users" />
@@ -226,7 +230,7 @@ export default function CustomerDetailPage() {
             >
               <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
             </button>
-            <h1 className="text-xl font-semibold text-[#0F172A]">Customer</h1>
+            <h1 className="text-xl font-semibold text-[#0F172A]">{txt.customerDetailHeading}</h1>
           </div>
           {toast ? <span className="text-xs text-gray-400">{toast}</span> : null}
         </div>
@@ -238,13 +242,15 @@ export default function CustomerDetailPage() {
 
         <div className="mt-10 grid grid-cols-2 gap-4">
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">Visits</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{txt.visitsTitle}</div>
             <div className="mt-2 text-3xl font-semibold tabular-nums text-gray-900">
               {detail.total_visits}
             </div>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">Stamps</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              {txt.visitsMetaStamps}
+            </div>
             <div className="mt-2 text-3xl font-semibold tabular-nums text-gray-900">
               {detail.stamp_count}
             </div>
@@ -257,15 +263,15 @@ export default function CustomerDetailPage() {
           onClick={() => void handleGiveStamp()}
           className="mt-10 w-full rounded-2xl bg-black py-4 text-base font-semibold text-white disabled:opacity-50"
         >
-          Give Stamp
+          {txt.visitsGiveStamp}
         </button>
 
         <section className="mt-14">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Visits</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">{txt.visitsTitle}</h2>
           <ul className="mt-5 space-y-3">
             {visitsSorted.length === 0 ? (
               <li className="rounded-2xl border border-gray-200 bg-white px-5 py-6 text-sm text-gray-500">
-                No visits yet
+                {txt.customerDetailNoVisits}
               </li>
             ) : (
               visitsSorted.map((v) => (
@@ -273,7 +279,7 @@ export default function CustomerDetailPage() {
                   key={v.id}
                   className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4"
                 >
-                  <span className="text-sm text-gray-900">Stamp added</span>
+                  <span className="text-sm text-gray-900">{txt.visitsStampAdded}</span>
                   <time className="shrink-0 text-sm tabular-nums text-gray-400">
                     {formatVisitWhen(v.visitTime)}
                   </time>
@@ -284,11 +290,11 @@ export default function CustomerDetailPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Rewards</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">{txt.homeRewards}</h2>
           <ul className="mt-5 space-y-3">
             {rewardsSorted.length === 0 ? (
               <li className="rounded-2xl border border-gray-200 bg-white px-5 py-6 text-sm text-gray-500">
-                No rewards yet
+                {txt.customerDetailNoRewardsList}
               </li>
             ) : (
               rewardsSorted.map((r) => (
@@ -296,14 +302,17 @@ export default function CustomerDetailPage() {
                   key={r.id}
                   className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4"
                 >
-                  <span className="text-sm text-gray-700">Reward #{r.id}</span>
+                  <span className="text-sm text-gray-700">
+                    {txt.customerDetailRewardLine}
+                    {r.id}
+                  </span>
                   <span
                     className={[
                       "shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold tracking-wide",
                       rewardBadgeClass(r.status),
                     ].join(" ")}
                   >
-                    {rewardBadgeLabel(r.status)}
+                    {rewardBadgeLabel(r.status, txt)}
                   </span>
                 </li>
               ))
@@ -317,15 +326,15 @@ export default function CustomerDetailPage() {
       {rewardModal ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-6">
           <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-            <div className="text-lg font-semibold text-gray-900">🎉 Reward unlocked!</div>
-            <div className="mt-2 text-sm text-gray-500">Customer reached 8 stamps</div>
+            <div className="text-lg font-semibold text-gray-900">{txt.visitsModalTitle}</div>
+            <div className="mt-2 text-sm text-gray-500">{txt.visitsModalSubtitle}</div>
             <button
               type="button"
               disabled={redeeming}
               onClick={() => void handleRedeem()}
               className="mt-6 w-full rounded-xl bg-black py-3 text-sm font-semibold text-white disabled:opacity-50"
             >
-              Give Reward
+              {txt.visitsModalButton}
             </button>
           </div>
         </div>

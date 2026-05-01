@@ -1,7 +1,9 @@
 "use client";
 
 import { useAuth } from "@/app/providers";
+import { t } from "@/app/profile/copy";
 import { apolloClient } from "@/lib/apollo/client";
+import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
 import { CREATE_BUSINESS } from "@/graphql/mutations/createBusiness";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { useMutation, useQuery } from "@apollo/client/react";
@@ -18,8 +20,7 @@ export function RequireAuth({
   const prevAuthedRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const [loginMsg, setLoginMsg] = useState<string | null>(null);
-  const [langSheetOpen, setLangSheetOpen] = useState(false);
-  const [lang, setLang] = useState<"uz" | "ru">("uz");
+  const [lang, setLang] = useState<AppLang>("uz");
 
   const [bizName, setBizName] = useState("");
   const [bizPhone, setBizPhone] = useState("");
@@ -30,13 +31,27 @@ export function RequireAuth({
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    try {
-      const v = localStorage.getItem("lang");
-      if (v === "ru" || v === "uz") setLang(v);
-    } catch {
-      // ignore
-    }
+    const apply = () => {
+      try {
+        const v = localStorage.getItem("lang");
+        if (v === "ru" || v === "uz") setLang(v);
+      } catch {
+        // ignore
+      }
+    };
+    apply();
+    window.addEventListener(STAMPLY_LANG_CHANGED, apply);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "lang") apply();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(STAMPLY_LANG_CHANGED, apply);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
+
+  const txt = t[lang];
 
   // Server validation: profile must load successfully for token to be considered valid.
   const { loading: validating, error: profileError, data: profileData } = useQuery(PROFILE_QUERY, {
@@ -79,10 +94,10 @@ export function RequireAuth({
       if (prevAuthedRef.current) return;
     }
 
-    setToast("Welcome back 👋");
-    const t = window.setTimeout(() => setToast(null), 1400);
-    return () => window.clearTimeout(t);
-  }, [ready, token, profileError, validating]);
+    setToast(txt.welcomeBackToast);
+    const welcomeTimer = window.setTimeout(() => setToast(null), 1400);
+    return () => window.clearTimeout(welcomeTimer);
+  }, [ready, token, profileError, validating, txt.welcomeBackToast]);
 
   if (!ready) {
     return (
@@ -101,16 +116,29 @@ export function RequireAuth({
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto min-h-dvh max-w-md px-4 pb-24 pt-6">
-          <div className="mb-6 flex items-center justify-between">
-            <div />
-            <button
-              type="button"
-              onClick={() => setLangSheetOpen(true)}
-              className="px-4 py-2 rounded-full bg-[#0284C7] text-sm font-semibold text-white shadow-sm active:opacity-90"
-              aria-label="Language"
-            >
-              {lang === "ru" ? "🇷🇺 RU" : "🇺🇿 UZ"}
-            </button>
+          <div className="mb-6 flex items-center justify-end">
+            <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setStoredLang("uz")}
+                className={[
+                  "rounded-full px-3 py-1.5 transition-colors",
+                  lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+                ].join(" ")}
+              >
+                UZ
+              </button>
+              <button
+                type="button"
+                onClick={() => setStoredLang("ru")}
+                className={[
+                  "rounded-full px-3 py-1.5 transition-colors",
+                  lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+                ].join(" ")}
+              >
+                RU
+              </button>
+            </div>
           </div>
 
           <div className="grid place-items-center">
@@ -119,8 +147,8 @@ export function RequireAuth({
               <ShieldCheck className="h-7 w-7" aria-hidden />
             </div>
 
-            <div className="mt-4 text-lg font-semibold text-[#0F172A]">Welcome to Stamply</div>
-            <div className="mt-1 text-sm text-gray-500">Login to continue</div>
+            <div className="mt-4 text-lg font-semibold text-[#0F172A]">{txt.loginWelcomeTitle}</div>
+            <div className="mt-1 text-sm text-gray-500">{txt.loginSubtitle}</div>
 
             {loginMsg ? <div className="mt-4 text-sm text-gray-600">{loginMsg}</div> : null}
 
@@ -132,86 +160,27 @@ export function RequireAuth({
                   const res = await loginWithTelegram();
                   if (res.ok) return;
                   if (res.reason === "OPEN_IN_TELEGRAM") {
-                    setLoginMsg("Open inside Telegram to continue.");
+                    setLoginMsg(txt.loginOpenInTelegram);
                     return;
                   }
                   if (res.reason === "USER_NOT_REGISTERED") {
                     // Telegram-first: user must login first; backend should ideally not return this anymore.
-                    setLoginMsg("Login failed. Please try again.");
+                    setLoginMsg(txt.loginFailed);
                     return;
                   }
-                  setLoginMsg("Login failed. Please try again.");
+                  setLoginMsg(txt.loginFailed);
                 })();
               }}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3.5 text-sm font-semibold text-white transition active:scale-[0.99]"
             >
               <MessageCircle className="h-4 w-4" aria-hidden />
-              Continue with Telegram
+              {txt.loginContinueTelegram}
             </button>
 
-            <div className="mt-4 text-xs text-gray-400">
-              By continuing, you agree to use Telegram authentication.
-            </div>
+            <div className="mt-4 text-xs text-gray-400">{txt.loginTermsNote}</div>
           </div>
           </div>
 
-          {langSheetOpen ? (
-            <div className="fixed inset-0 z-50 bg-black/40 px-4" onClick={() => setLangSheetOpen(false)}>
-              <div className="mx-auto max-w-md" onClick={(e) => e.stopPropagation()}>
-                <div className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-[28px] border border-gray-200 bg-white p-4 shadow-[0_-12px_40px_rgba(0,0,0,0.12)]">
-                  <div className="flex items-center justify-between">
-                    <div className="text-base font-semibold text-gray-900">Language</div>
-                    <button
-                      type="button"
-                      className="text-sm font-semibold text-gray-500"
-                      onClick={() => setLangSheetOpen(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLang("uz");
-                        try {
-                          localStorage.setItem("lang", "uz");
-                        } catch {
-                          // ignore
-                        }
-                        setLangSheetOpen(false);
-                      }}
-                      className={[
-                        "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
-                        lang === "uz" ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]" : "border-gray-200 bg-white text-gray-900",
-                      ].join(" ")}
-                    >
-                      🇺🇿 Uzbek
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLang("ru");
-                        try {
-                          localStorage.setItem("lang", "ru");
-                        } catch {
-                          // ignore
-                        }
-                        setLangSheetOpen(false);
-                      }}
-                      className={[
-                        "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
-                        lang === "ru" ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]" : "border-gray-200 bg-white text-gray-900",
-                      ].join(" ")}
-                    >
-                      🇷🇺 Russian
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
     );
@@ -235,8 +204,8 @@ export function RequireAuth({
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pt-10 pb-32">
           <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="text-sm font-semibold text-gray-900">Creating business…</div>
-            <div className="mt-2 text-sm text-gray-500">Finalizing setup. Please wait.</div>
+            <div className="text-sm font-semibold text-gray-900">{txt.registerCreatingTitle}</div>
+            <div className="mt-2 text-sm text-gray-500">{txt.registerCreatingSubtitle}</div>
             <div className="mt-4 h-10 rounded-xl bg-gray-100" />
           </div>
         </div>
@@ -282,34 +251,32 @@ export function RequireAuth({
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#00AEEF]/10 text-[#0077A3]">
               <Building2 className="h-7 w-7" aria-hidden />
             </div>
-            <div className="mt-4 text-lg font-semibold text-[#0F172A]">Create your business</div>
-            <div className="mt-1 text-sm text-gray-500">
-              This is the information your customers will see
-            </div>
+            <div className="mt-4 text-lg font-semibold text-[#0F172A]">{txt.registerTitle}</div>
+            <div className="mt-1 text-sm text-gray-500">{txt.registerSubtitle}</div>
 
             <div className="mt-4 space-y-2 text-left">
               <input
                 value={bizName}
                 onChange={(e) => setBizName(e.target.value)}
-                placeholder="Business Name *"
+                placeholder={txt.registerBizNamePh}
                 className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
               <input
                 value={bizPhone}
                 onChange={(e) => setBizPhone(e.target.value)}
-                placeholder="Phone *"
+                placeholder={txt.registerPhonePh}
                 className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
               <input
                 value={bizAddress}
                 onChange={(e) => setBizAddress(e.target.value)}
-                placeholder="Address (optional)"
+                placeholder={txt.registerAddressPh}
                 className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
               <input
                 value={bizType}
                 onChange={(e) => setBizType(e.target.value)}
-                placeholder="Business Type (optional)"
+                placeholder={txt.registerTypePh}
                 className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
             </div>
@@ -340,7 +307,7 @@ export function RequireAuth({
                     });
                     setRegisterMsg(null);
                   } catch {
-                    setRegisterMsg("Failed to create business. Please try again.");
+                    setRegisterMsg(txt.registerFailed);
                   } finally {
                     setCreating(false);
                   }
@@ -348,7 +315,7 @@ export function RequireAuth({
               }}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3 text-sm font-semibold text-white transition disabled:opacity-50 active:scale-[0.99]"
             >
-              {creatingBusiness ? "Creating..." : "Create Business"}
+              {creatingBusiness ? txt.registerCreating : txt.registerCreateBusiness}
             </button>
           </div>
         </div>

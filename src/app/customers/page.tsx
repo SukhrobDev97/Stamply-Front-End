@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/app/providers";
+import { useAppLang } from "@/lib/use-app-lang";
 
 type Customer = {
   id: number;
@@ -47,6 +48,7 @@ function Avatar({ name }: { name: string }) {
 
 export default function CustomersPage() {
   const router = useRouter();
+  const { txt } = useAppLang();
   const [q, setQ] = useState("");
   const { ready, isAuthenticated } = useAuth();
   const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
@@ -82,32 +84,34 @@ export default function CustomersPage() {
             >
               <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
             </button>
-            <h1 className="text-xl font-semibold text-[#0F172A]">Customers</h1>
+            <h1 className="text-xl font-semibold text-[#0F172A]">{txt.homeCustomers}</h1>
           </div>
 
           {loading ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Loading...
+              {txt.homeLoading}
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Failed to load customers
+              {txt.customersFailed}
             </div>
           ) : (
             <>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search by name or phone"
+                placeholder={txt.customersSearchPh}
                 className="mt-4 w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
 
-              <div className="mt-3 text-xs text-gray-400">Total: {customers.length}</div>
+              <div className="mt-3 text-xs text-gray-400">
+                {txt.customersTotalLabel}: {customers.length}
+              </div>
 
               <div className="mt-4 space-y-2">
                 {filtered.length === 0 ? (
                   <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-                    No customers yet
+                    {txt.customersEmpty}
                   </div>
                 ) : (
                   filtered.map((c) => (
@@ -120,7 +124,8 @@ export default function CustomersPage() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-base font-semibold text-gray-900">{c.name}</div>
                         <div className="mt-1 text-sm text-gray-500">
-                          {c.phone} • {c.totalVisits} visits • {c.stampCount} stamps
+                          {c.phone} • {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
+                          {txt.visitsMetaStamps}
                         </div>
                       </div>
                       <ArrowIcon className="h-5 w-5 shrink-0 text-gray-400" />

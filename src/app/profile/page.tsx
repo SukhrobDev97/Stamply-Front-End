@@ -4,13 +4,18 @@ import { BottomNav } from "@/components/common/bottom-nav";
 import { Avatar } from "@/components/common/avatar";
 import { RequireAuth } from "@/components/common/require-auth";
 import { CREATE_STAFF_INVITE_MUTATION } from "@/graphql/mutations/createStaffInvite.mutation";
+import { LEAVE_BUSINESS_MUTATION } from "@/graphql/mutations/leaveBusiness.mutation";
+import { REMOVE_STAFF_MUTATION } from "@/graphql/mutations/removeStaff.mutation";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { GET_BUSINESS_STAFF_QUERY } from "@/graphql/queries/getBusinessStaff.query";
 import { useAuth } from "@/app/providers";
 import { useQuery } from "@apollo/client/react";
 import { useMutation } from "@apollo/client/react";
-import { ArrowLeft, ChevronRight, Globe, HelpCircle, LogOut, UserPlus } from "lucide-react";
+import { ArrowLeft, ChevronRight, DoorOpen, HelpCircle, Loader2, LogOut, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
+import { t, type ProfileLang } from "./copy";
 
 type ProfileData = {
   profile: {
@@ -26,14 +31,20 @@ type ProfileData = {
   } | null;
 };
 
-function getFirstLetter(value: string) {
-  const safe = (value ?? "").trim();
-  return safe ? safe[0]!.toUpperCase() : "U";
-}
+type StaffRow = {
+  id: string | number;
+  name?: string | null;
+  telegram_id?: string | null;
+  avatar_url?: string | null;
+};
 
-function RoleBadge({ role }: { role: string }) {
+type GetBusinessStaffData = {
+  getBusinessStaff: StaffRow[];
+};
+
+function RoleBadge({ role, ownerLabel, staffLabel }: { role: string; ownerLabel: string; staffLabel: string }) {
   const r = role.toLowerCase();
-  const label = r === "owner" ? "Owner" : r === "staff" ? "Staff" : role;
+  const label = r === "owner" ? ownerLabel : r === "staff" ? staffLabel : role;
   return (
     <span className="inline-flex items-center rounded-full bg-[#00AEEF]/10 px-2 py-1 text-xs font-semibold text-[#0077A3]">
       {label}
@@ -81,40 +92,66 @@ export default function ProfilePage() {
     fetchPolicy: "network-only",
   });
   const [toast, setToast] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<{ id: number; name: string } | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [createInvite, { loading: inviteLoading }] = useMutation<{
     createStaffInvite?: { inviteUrl?: string | null } | null;
   }>(CREATE_STAFF_INVITE_MUTATION);
+  const [removeStaff, { loading: removeLoading }] = useMutation<{ removeStaff: boolean }>(REMOVE_STAFF_MUTATION, {
+    refetchQueries: [{ query: GET_BUSINESS_STAFF_QUERY }],
+    awaitRefetchQueries: true,
+  });
+  const [leaveBusiness, { loading: leaveLoading }] = useMutation<{ leaveBusiness: boolean }>(LEAVE_BUSINESS_MUTATION);
 
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 1600);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setToast(null), 1600);
+    return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const [lang, setLang] = useState<ProfileLang>("uz");
+
+  useEffect(() => {
+    const apply = () => {
+      try {
+        const v = localStorage.getItem("lang");
+        if (v === "ru" || v === "uz") setLang(v);
+      } catch {
+        // ignore
+      }
+    };
+    apply();
+    window.addEventListener(STAMPLY_LANG_CHANGED, apply);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "lang") apply();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(STAMPLY_LANG_CHANGED, apply);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  const txt = t[lang];
+
   const profile = data?.profile ?? null;
-  const name = typeof profile?.name === "string" && profile.name.trim() ? profile.name.trim() : "User";
-  const role = typeof profile?.role === "string" && profile.role.trim() ? profile.role.trim() : "User";
+  const name = typeof profile?.name === "string" && profile.name.trim() ? profile.name.trim() : txt.userFallback;
+  const role = typeof profile?.role === "string" && profile.role.trim() ? profile.role.trim() : txt.userFallback;
+  const isOwner = role.toLowerCase() === "owner";
+  const isStaff = role.toLowerCase() === "staff";
   const avatarUrl = typeof profile?.avatar_url === "string" && profile.avatar_url.trim() ? profile.avatar_url : null;
   const biz = profile?.business ?? null;
   const businessName =
     typeof biz?.name === "string" && biz.name.trim() ? biz.name.trim() : "";
   const fallbackAvatarText = businessName || name;
 
-  const [languageSheetOpen, setLanguageSheetOpen] = useState(false);
-  const [language, setLanguage] = useState<"uz" | "ru">("uz");
-
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem("stamply_language");
-      if (v === "ru" || v === "uz") setLanguage(v);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const languageLabel = useMemo(() => {
-    return language === "ru" ? "🇷🇺 Russian" : "🇺🇿 Uzbek";
-  }, [language]);
+  const { data: staffData, loading: staffLoading, error: staffError } = useQuery<GetBusinessStaffData>(
+    GET_BUSINESS_STAFF_QUERY,
+    {
+      skip: !ready || !isAuthenticated || !token || !isOwner,
+      fetchPolicy: "network-only",
+    },
+  );
 
   const onSupport = () => {
     const url = "https://t.me/sukhr0b97";
@@ -132,11 +169,11 @@ export default function ProfilePage() {
       const res = await createInvite();
       const inviteUrl = res.data?.createStaffInvite?.inviteUrl ?? null;
       if (!inviteUrl) {
-        setToast("Failed to generate invite link");
+        setToast(txt.failedInvite);
         return;
       }
 
-      const shareText = `Join our staff:\n\n🏪 ${businessName || "Our business"}\n\nTap the link below 👇`;
+      const shareText = `${txt.inviteShareLine1}\n\n🏪 ${businessName || txt.ourBusiness}\n\n${txt.inviteShareLine3}`;
       const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(
         shareText,
       )}`;
@@ -149,13 +186,13 @@ export default function ProfilePage() {
 
       try {
         await navigator.clipboard.writeText(inviteUrl);
-        setToast("Invite link copied");
+        setToast(txt.inviteCopied);
       } catch {
         // Last-resort fallback if clipboard is blocked
-        window.prompt("Copy invite link:", inviteUrl);
+        window.prompt(txt.copyInvitePrompt, inviteUrl);
       }
     } catch {
-      setToast("Failed to generate invite link");
+      setToast(txt.failedInvite);
     }
   };
 
@@ -172,7 +209,7 @@ export default function ProfilePage() {
             >
               <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
             </button>
-            <h1 className="text-xl font-semibold text-[#0F172A]">Profile</h1>
+            <h1 className="text-xl font-semibold text-[#0F172A]">{txt.profileTitle}</h1>
           </div>
 
         {!ready ? (
@@ -182,7 +219,7 @@ export default function ProfilePage() {
           </div>
         ) : !isAuthenticated ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
-            Please login in Telegram mini app.
+            {txt.loginTelegramOnly}
           </div>
         ) : loading ? (
           <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
@@ -191,7 +228,7 @@ export default function ProfilePage() {
           </div>
         ) : error ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-            Failed to load profile
+            {txt.failedLoadProfile}
             {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
           </div>
         ) : (
@@ -203,7 +240,7 @@ export default function ProfilePage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="truncate text-base font-semibold text-gray-900">{businessName || "—"}</div>
-                    <RoleBadge role={role} />
+                    <RoleBadge role={role} ownerLabel={txt.roleOwner} staffLabel={txt.roleStaff} />
                   </div>
                   {biz?.phone?.trim() ? (
                     <div className="mt-1 text-sm text-gray-500">{biz.phone}</div>
@@ -217,31 +254,87 @@ export default function ProfilePage() {
 
             {/* Settings */}
             <div className="rounded-2xl border border-black/5 bg-white p-2 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-              <SettingsRow
-                icon={<UserPlus className="h-5 w-5" aria-hidden />}
-                label={inviteLoading ? "Generating invite…" : "Invite Staff"}
-                onClick={() => void onInviteStaff()}
-              />
-              <div className="h-px bg-gray-100 mx-3" />
-              <SettingsRow
-                icon={<Globe className="h-5 w-5" aria-hidden />}
-                label="Language"
-                value={language === "ru" ? "RU" : "UZ"}
-                onClick={() => setLanguageSheetOpen(true)}
-              />
-              <div className="h-px bg-gray-100 mx-3" />
-              <SettingsRow icon={<HelpCircle className="h-5 w-5" aria-hidden />} label="Support" onClick={onSupport} />
+              {isOwner ? (
+                <>
+                  <SettingsRow
+                    icon={<UserPlus className="h-5 w-5" aria-hidden />}
+                    label={inviteLoading ? txt.generatingInvite : txt.inviteStaff}
+                    onClick={() => void onInviteStaff()}
+                  />
+                  <div className="h-px bg-gray-100 mx-3" />
+                </>
+              ) : null}
+              <SettingsRow icon={<HelpCircle className="h-5 w-5" aria-hidden />} label={txt.support} onClick={onSupport} />
               <div className="h-px bg-gray-100 mx-3" />
               <SettingsRow
                 icon={<LogOut className="h-5 w-5" aria-hidden />}
-                label="Logout"
+                label={txt.logout}
                 onClick={() => {
-                  const ok = window.confirm("Logout?");
+                  const ok = window.confirm(txt.logoutConfirm);
                   if (!ok) return;
                   void logout();
                 }}
               />
             </div>
+
+            {isOwner ? (
+              <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+                <div className="text-sm font-semibold text-gray-900">{txt.staff}</div>
+                {staffError ? (
+                  <div className="mt-3 text-sm text-red-600">
+                    {txt.staffLoadError}
+                    {staffError.message ? (
+                      <span className="mt-1 block text-xs text-red-500/90">{staffError.message}</span>
+                    ) : null}
+                  </div>
+                ) : staffLoading ? (
+                  <div className="mt-4 flex justify-center py-6 text-gray-400">
+                    <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+                  </div>
+                ) : (staffData?.getBusinessStaff?.length ?? 0) === 0 ? (
+                  <div className="mt-3 text-sm text-gray-500">{txt.noStaffYet}</div>
+                ) : (
+                  <ul className="mt-3 space-y-2">
+                    {(staffData?.getBusinessStaff ?? []).map((s) => {
+                      const sid = Number(s.id);
+                      const sname =
+                        typeof s.name === "string" && s.name.trim() ? s.name.trim() : txt.userFallback;
+                      const surl =
+                        typeof s.avatar_url === "string" && s.avatar_url.trim() ? s.avatar_url.trim() : null;
+                      return (
+                        <li
+                          key={sid}
+                          className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-2.5"
+                        >
+                          <Avatar src={surl} fallbackText={sname} size={40} className="text-sm shrink-0" />
+                          <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">{sname}</div>
+                          <button
+                            type="button"
+                            onClick={() => setRemoveTarget({ id: sid, name: sname })}
+                            className="shrink-0 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 active:scale-[0.98]"
+                          >
+                            {txt.remove}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+
+            {isStaff ? (
+              <div className="rounded-2xl border border-red-100 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+                <button
+                  type="button"
+                  onClick={() => setLeaveConfirmOpen(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white py-3 text-sm font-semibold text-red-600 active:scale-[0.99]"
+                >
+                  <DoorOpen className="h-4 w-4 shrink-0" aria-hidden />
+                  {txt.leaveBusiness}
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
         </div>
@@ -256,72 +349,109 @@ export default function ProfilePage() {
           </div>
         ) : null}
 
-        {languageSheetOpen ? (
+        {leaveConfirmOpen ? (
           <div
-            className="fixed inset-0 z-50 bg-black/40 px-4"
-            onClick={() => setLanguageSheetOpen(false)}
+            className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 px-4 pb-8 pt-10 sm:items-center"
+            onClick={() => (!leaveLoading ? setLeaveConfirmOpen(false) : null)}
           >
-            <div className="mx-auto max-w-md" onClick={(e) => e.stopPropagation()}>
-              <div className="fixed inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-[28px] border border-gray-200 bg-white p-4 shadow-[0_-12px_40px_rgba(0,0,0,0.12)]">
-                <div className="flex items-center justify-between">
-                  <div className="text-base font-semibold text-gray-900">Language</div>
-                  <button
-                    type="button"
-                    className="text-sm font-semibold text-gray-500"
-                    onClick={() => setLanguageSheetOpen(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-
-              <div className="mt-3 space-y-2">
+            <div
+              className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-base font-semibold text-gray-900">{txt.leaveTitle}</div>
+              <div className="mt-2 text-sm text-gray-500">{txt.leaveSubtitle}</div>
+              <div className="mt-5 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setLanguage("uz");
-                    try {
-                      localStorage.setItem("stamply_language", "uz");
-                    } catch {
-                      // ignore
-                    }
-                    setLanguageSheetOpen(false);
-                  }}
-                  className={[
-                    "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
-                    language === "uz"
-                      ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]"
-                      : "border-gray-200 bg-white text-gray-900",
-                  ].join(" ")}
+                  disabled={leaveLoading}
+                  onClick={() => setLeaveConfirmOpen(false)}
+                  className="flex-1 rounded-xl border border-gray-200 bg-white py-3 text-sm font-semibold text-gray-800 active:scale-[0.99] disabled:opacity-50"
                 >
-                  🇺🇿 Uzbek
+                  {txt.cancel}
                 </button>
                 <button
                   type="button"
+                  disabled={leaveLoading}
                   onClick={() => {
-                    setLanguage("ru");
-                    try {
-                      localStorage.setItem("stamply_language", "ru");
-                    } catch {
-                      // ignore
-                    }
-                    setLanguageSheetOpen(false);
+                    void (async () => {
+                      try {
+                        const res = await leaveBusiness();
+                        if (res.data?.leaveBusiness !== true) {
+                          setToast(txt.couldNotLeave);
+                          setLeaveConfirmOpen(false);
+                          return;
+                        }
+                        setLeaveConfirmOpen(false);
+                        await logout();
+                        router.replace("/");
+                      } catch {
+                        setToast(txt.couldNotLeave);
+                        setLeaveConfirmOpen(false);
+                      }
+                    })();
                   }}
-                  className={[
-                    "w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold",
-                    language === "ru"
-                      ? "border-[#00AEEF]/30 bg-[#00AEEF]/10 text-[#0077A3]"
-                      : "border-gray-200 bg-white text-gray-900",
-                  ].join(" ")}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white active:scale-[0.99] disabled:opacity-50"
                 >
-                  🇷🇺 Russian
+                  {leaveLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                  {txt.leave}
                 </button>
               </div>
-
-              <div className="mt-3 text-xs text-gray-400">{languageLabel}</div>
-            </div>
             </div>
           </div>
         ) : null}
+
+        {removeTarget ? (
+          <div
+            className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 px-4 pb-8 pt-10 sm:items-center"
+            onClick={() => (!removeLoading ? setRemoveTarget(null) : null)}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-base font-semibold text-gray-900">{txt.removeStaffTitle}</div>
+              <div className="mt-2 text-sm text-gray-500">
+                {removeTarget.name} {txt.removeStaffLossSuffix}
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  disabled={removeLoading}
+                  onClick={() => setRemoveTarget(null)}
+                  className="flex-1 rounded-xl border border-gray-200 bg-white py-3 text-sm font-semibold text-gray-800 active:scale-[0.99] disabled:opacity-50"
+                >
+                  {txt.cancel}
+                </button>
+                <button
+                  type="button"
+                  disabled={removeLoading}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const res = await removeStaff({ variables: { staffId: removeTarget.id } });
+                        if (res.data?.removeStaff !== true) {
+                          setToast(txt.failedRemoveStaff);
+                          setRemoveTarget(null);
+                          return;
+                        }
+                        setRemoveTarget(null);
+                        setToast(txt.staffRemoved);
+                      } catch {
+                        setToast(txt.failedRemoveStaff);
+                        setRemoveTarget(null);
+                      }
+                    })();
+                  }}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white active:scale-[0.99] disabled:opacity-50"
+                >
+                  {removeLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                  {txt.remove}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
     </div>
     </RequireAuth>
   );

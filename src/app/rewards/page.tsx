@@ -6,6 +6,7 @@ import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutatio
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { useAuth } from "@/app/providers";
+import { useAppLang } from "@/lib/use-app-lang";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -56,8 +57,23 @@ function formatListDate(iso: string | null | undefined) {
   }).format(d);
 }
 
+function RewardsPageFallback() {
+  const { txt } = useAppLang();
+  return (
+    <div className="min-h-dvh bg-[#f7f7f8] text-black">
+      <div className="mx-auto max-w-md px-4 pt-3 pb-32">
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
+          {txt.homeLoading}
+        </div>
+      </div>
+      <BottomNav currentKey="rewards" />
+    </div>
+  );
+}
+
 function RewardsPageInner() {
   const router = useRouter();
+  const { txt } = useAppLang();
   const searchParams = useSearchParams();
   const client = useApolloClient();
   const { ready, isAuthenticated } = useAuth();
@@ -199,21 +215,21 @@ function RewardsPageInner() {
           >
             <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
           </button>
-          <h1 className="text-xl font-semibold text-[#0F172A]">Rewards</h1>
+          <h1 className="text-xl font-semibold text-[#0F172A]">{txt.homeRewards}</h1>
         </div>
 
         <div className="mt-4 space-y-2">
           {loading || rowsLoading ? (
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Loading...
+              {txt.homeLoading}
             </div>
           ) : error ? (
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Failed to load rewards
+              {txt.rewardsFailed}
             </div>
           ) : rows.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              No rewards yet
+              {txt.rewardsEmpty}
             </div>
           ) : (
             rows.map((r) => {
@@ -242,7 +258,7 @@ function RewardsPageInner() {
                       onClick={() => void onRedeem(r.id)}
                       className="shrink-0 rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
-                      Redeem
+                      {txt.rewardsRedeem}
                     </button>
                   ) : (
                     <div
@@ -251,7 +267,7 @@ function RewardsPageInner() {
                         redeemed ? "text-green-600" : "text-yellow-600",
                       ].join(" ")}
                     >
-                      {redeemed ? "redeemed" : "unlocked"}
+                      {redeemed ? txt.homeRewardRedeemed : txt.homeRewardUnlocked}
                     </div>
                   )}
                 </div>
@@ -260,7 +276,9 @@ function RewardsPageInner() {
           )}
         </div>
 
-        <div className="mt-3 text-xs text-gray-400">Pending rewards: {unlockedCount}</div>
+        <div className="mt-3 text-xs text-gray-400">
+          {txt.rewardsPending}: {unlockedCount}
+        </div>
       </div>
 
       <BottomNav currentKey="rewards" />
@@ -270,18 +288,7 @@ function RewardsPageInner() {
 
 export default function RewardsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-dvh bg-[#f7f7f8] text-black">
-          <div className="mx-auto max-w-md px-4 pt-3 pb-32">
-            <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Loading...
-            </div>
-          </div>
-          <BottomNav currentKey="rewards" />
-        </div>
-      }
-    >
+    <Suspense fallback={<RewardsPageFallback />}>
       <RequireAuth>
         <RewardsPageInner />
       </RequireAuth>

@@ -11,6 +11,7 @@ import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/app/providers";
+import { useAppLang } from "@/lib/use-app-lang";
 
 type Customer = {
   id: number;
@@ -62,6 +63,7 @@ function formatTime(iso: string) {
 
 export default function VisitsPage() {
   const router = useRouter();
+  const { txt } = useAppLang();
   const [q, setQ] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [rewardModal, setRewardModal] = useState<{ rewardId: number } | null>(null);
@@ -79,8 +81,8 @@ export default function VisitsPage() {
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 1500);
-    return () => clearTimeout(t);
+    const toastTimer = setTimeout(() => setToast(null), 1500);
+    return () => clearTimeout(toastTimer);
   }, [toast]);
 
   const filtered = useMemo(() => {
@@ -116,7 +118,7 @@ export default function VisitsPage() {
           [
             {
               id: `${now}:${c.id}`,
-              title: `${c.name} → reward unlocked`,
+              title: `${c.name} → ${txt.visitsRecentReward}`,
               createdAt: now,
             },
             ...prev,
@@ -124,12 +126,12 @@ export default function VisitsPage() {
         );
         return;
       } else {
-        setToast("Stamp added");
+        setToast(txt.visitsStampAdded);
         setRecent((prev) =>
           [
             {
               id: `${now}:${c.id}`,
-              title: `${c.name} → stamp added`,
+              title: `${c.name} → ${txt.visitsRecentStamp}`,
               createdAt: now,
             },
             ...prev,
@@ -137,7 +139,7 @@ export default function VisitsPage() {
         );
       }
     } catch {
-      setToast("Failed");
+      setToast(txt.homeFailed);
     }
   };
 
@@ -149,13 +151,13 @@ export default function VisitsPage() {
         refetchQueries: [{ query: MY_CUSTOMERS_QUERY }],
       });
       if (res.data?.redeemReward !== true) {
-        setToast("Failed");
+        setToast(txt.homeFailed);
         return;
       }
       setRewardModal(null);
-      setToast("Reward given");
+      setToast(txt.visitsRewardGiven);
     } catch {
-      setToast("Failed");
+      setToast(txt.homeFailed);
     }
   };
 
@@ -173,25 +175,25 @@ export default function VisitsPage() {
               >
                 <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
               </button>
-              <h1 className="text-xl font-semibold text-[#0F172A]">Visits</h1>
+              <h1 className="text-xl font-semibold text-[#0F172A]">{txt.visitsTitle}</h1>
             </div>
             {toast ? <div className="text-xs text-gray-400">{toast}</div> : null}
           </div>
 
           {loading ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Loading...
+              {txt.homeLoading}
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
-              Failed to load visits
+              {txt.visitsFailed}
             </div>
           ) : (
             <>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search customer"
+                placeholder={txt.visitsSearchPh}
                 className="mt-4 w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
               />
 
@@ -205,7 +207,8 @@ export default function VisitsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-base font-semibold text-gray-900">{c.name}</div>
                       <div className="mt-1 text-sm text-gray-500">
-                        {c.phone} • {c.totalVisits} visits • {c.stampCount} stamps
+                        {c.phone} • {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
+                        {txt.visitsMetaStamps}
                       </div>
                     </div>
                     <button
@@ -214,18 +217,18 @@ export default function VisitsPage() {
                       onClick={() => onGiveStamp(c)}
                       className="rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
-                      Give Stamp
+                      {txt.visitsGiveStamp}
                     </button>
                   </div>
                 ))}
               </div>
 
               <div className="mt-8">
-                <SectionTitle>Recent visits</SectionTitle>
+                <SectionTitle>{txt.visitsRecent}</SectionTitle>
                 <div className="space-y-2">
                   {recent.length === 0 ? (
                     <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-                      No recent visits
+                      {txt.visitsNoRecent}
                     </div>
                   ) : (
                     recent.slice(0, 5).map((r) => (
@@ -249,15 +252,15 @@ export default function VisitsPage() {
         {rewardModal ? (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-6">
             <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm">
-              <div className="text-lg font-semibold text-black">🎉 Reward unlocked!</div>
-              <div className="mt-2 text-sm text-gray-500">Customer reached 8 stamps</div>
+              <div className="text-lg font-semibold text-black">{txt.visitsModalTitle}</div>
+              <div className="mt-2 text-sm text-gray-500">{txt.visitsModalSubtitle}</div>
               <button
                 type="button"
                 disabled={redeeming}
                 onClick={() => void handleRedeem()}
                 className="mt-6 w-full rounded-xl bg-black py-3 text-sm font-semibold text-white disabled:opacity-50"
               >
-                Give Reward
+                {txt.visitsModalButton}
               </button>
             </div>
           </div>

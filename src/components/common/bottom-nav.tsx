@@ -2,13 +2,31 @@
 
 import type React from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { t, type ProfileLang } from "@/app/profile/copy";
+import { useAppLang } from "@/lib/use-app-lang";
 
 type BottomNavItem = {
   key: string;
-  label: string;
   href?: string;
   icon: (props: { className: string }) => React.ReactNode;
 };
+
+function labelForNav(key: string, langTxt: (typeof t)[ProfileLang]) {
+  switch (key) {
+    case "home":
+      return langTxt.navHome;
+    case "users":
+      return langTxt.homeCustomers;
+    case "visits":
+      return langTxt.visitsTitle;
+    case "rewards":
+      return langTxt.homeRewards;
+    case "profile":
+      return langTxt.profileTitle;
+    default:
+      return key;
+  }
+}
 
 function IconHome({ className }: { className: string }) {
   return (
@@ -106,21 +124,21 @@ function IconProfile({ className }: { className: string }) {
 }
 
 const items: BottomNavItem[] = [
-  { key: "home", label: "Home", href: "/", icon: (p) => <IconHome {...p} /> },
+  { key: "home", href: "/", icon: (p) => <IconHome {...p} /> },
   {
     key: "users",
-    label: "Users",
     href: "/customers",
     icon: (p) => <IconUsers {...p} />,
   },
-  { key: "visits", label: "Visits", href: "/visits", icon: (p) => <IconVisits {...p} /> },
-  { key: "rewards", label: "Rewards", href: "/rewards", icon: (p) => <IconRewards {...p} /> },
-  { key: "profile", label: "Profile", href: "/profile", icon: (p) => <IconProfile {...p} /> },
+  { key: "visits", href: "/visits", icon: (p) => <IconVisits {...p} /> },
+  { key: "rewards", href: "/rewards", icon: (p) => <IconRewards {...p} /> },
+  { key: "profile", href: "/profile", icon: (p) => <IconProfile {...p} /> },
 ];
 
 export function BottomNav({ currentKey }: { currentKey: string }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { txt } = useAppLang();
 
   return (
     <div className="fixed bottom-0 left-0 right-0 h-[88px] border-t border-gray-200 bg-white">
@@ -147,7 +165,7 @@ export function BottomNav({ currentKey }: { currentKey: string }) {
                   active ? "text-[#00AEEF]" : "text-gray-400",
                 ].join(" ")}
               >
-                {it.label}
+                {labelForNav(it.key, txt)}
               </div>
             </div>
           );

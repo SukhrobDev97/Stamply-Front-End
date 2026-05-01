@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+
+Be concise.
+
+Rules:
+- no unnecessary explanation
+- prefer minimal code
+- do not rewrite full files unless asked
+- follow clean architecture
+- prioritize performance and clarity
