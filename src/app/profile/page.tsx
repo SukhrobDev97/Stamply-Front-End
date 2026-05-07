@@ -9,11 +9,13 @@ import { REMOVE_STAFF_MUTATION } from "@/graphql/mutations/removeStaff.mutation"
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { GET_BUSINESS_STAFF_QUERY } from "@/graphql/queries/getBusinessStaff.query";
 import { useAuth } from "@/app/providers";
+import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { useQuery } from "@apollo/client/react";
 import { useMutation } from "@apollo/client/react";
-import { ArrowLeft, ChevronRight, DoorOpen, HelpCircle, Loader2, LogOut, UserPlus } from "lucide-react";
+import { ArrowLeft, ChevronRight, DoorOpen, HelpCircle, Loader2, LogOut, Megaphone, UserPlus } from "lucide-react";
+import { QRCodeCanvas } from "qrcode.react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { t, type ProfileLang } from "./copy";
 
@@ -102,6 +104,7 @@ export default function ProfilePage() {
     awaitRefetchQueries: true,
   });
   const [leaveBusiness, { loading: leaveLoading }] = useMutation<{ leaveBusiness: boolean }>(LEAVE_BUSINESS_MUTATION);
+  const qrModal = useOverlayModal();
 
   useEffect(() => {
     if (!toast) return;
@@ -144,6 +147,24 @@ export default function ProfilePage() {
   const businessName =
     typeof biz?.name === "string" && biz.name.trim() ? biz.name.trim() : "";
   const fallbackAvatarText = businessName || name;
+
+  const qrValue = useMemo(() => {
+    const id = biz?.id;
+    if (typeof id === "number" && Number.isFinite(id)) {
+      return `https://t.me/stamplyBot?start=business_${id}`;
+    }
+    return "https://t.me/stamplyBot";
+  }, [biz?.id]);
+
+  const onDownloadQr = useCallback(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("#profile-qr canvas");
+    if (!canvas) return;
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "stamply-qr.png";
+    a.click();
+  }, []);
 
   const { data: staffData, loading: staffLoading, error: staffError } = useQuery<GetBusinessStaffData>(
     GET_BUSINESS_STAFF_QUERY,
@@ -200,16 +221,27 @@ export default function ProfilePage() {
     <RequireAuth>
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pt-3 pb-32">
-          <div className="flex items-center gap-3 mb-4">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="h-9 w-9 rounded-full bg-[#00AEEF]/10 flex items-center justify-center active:scale-95"
-              aria-label="Back"
-            >
-              <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
-            </button>
-            <h1 className="text-xl font-semibold text-[#0F172A]">{txt.profileTitle}</h1>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#00AEEF]/10 active:scale-95"
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-5 w-5 text-[#0077A3]" aria-hidden />
+              </button>
+              <h1 className="truncate text-xl font-semibold text-[#0F172A]">{txt.profileTitle}</h1>
+            </div>
+            {ready && isAuthenticated && !loading && !error ? (
+              <button
+                type="button"
+                onClick={() => qrModal.open()}
+                className="shrink-0 rounded-full bg-[#00AEEF]/10 px-3 py-1.5 text-xs font-semibold text-[#0077A3] active:scale-95"
+              >
+                QR
+              </button>
+            ) : null}
           </div>
 
         {!ready ? (
@@ -260,6 +292,16 @@ export default function ProfilePage() {
                     icon={<UserPlus className="h-5 w-5" aria-hidden />}
                     label={inviteLoading ? txt.generatingInvite : txt.inviteStaff}
                     onClick={() => void onInviteStaff()}
+                  />
+                  <div className="h-px bg-gray-100 mx-3" />
+                </>
+              ) : null}
+              {isOwner || isStaff ? (
+                <>
+                  <SettingsRow
+                    icon={<Megaphone className="h-5 w-5" aria-hidden />}
+                    label={txt.broadcastNav}
+                    onClick={() => router.push("/profile/broadcast")}
                   />
                   <div className="h-px bg-gray-100 mx-3" />
                 </>
@@ -396,6 +438,45 @@ export default function ProfilePage() {
                   {txt.leave}
                 </button>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {qrModal.show ? (
+          <div
+            className={qrModal.overlayClassName}
+            onTransitionEnd={qrModal.onOverlayTransitionEnd}
+          >
+            <div
+              className={[
+                "w-full max-w-sm rounded-xl border border-gray-200 bg-white p-5",
+                qrModal.panelClassName,
+                qrModal.panelOpenClassName,
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-black">{txt.homeScanQr}</div>
+                <button
+                  type="button"
+                  onClick={() => qrModal.close()}
+                  className="text-xs font-semibold text-gray-500 hover:text-black"
+                >
+                  {txt.homeClose}
+                </button>
+              </div>
+              <div
+                id="profile-qr"
+                className="mt-4 flex justify-center rounded-xl border border-gray-100 bg-white p-4"
+              >
+                <QRCodeCanvas value={qrValue} size={220} level="M" includeMargin />
+              </div>
+              <button
+                type="button"
+                onClick={onDownloadQr}
+                className="mt-4 w-full rounded-xl bg-black py-3 text-sm font-semibold text-white active:scale-[0.99]"
+              >
+                {txt.homeDownload}
+              </button>
             </div>
           </div>
         ) : null}

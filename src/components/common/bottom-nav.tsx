@@ -141,7 +141,7 @@ export function BottomNav({ currentKey }: { currentKey: string }) {
   const { txt } = useAppLang();
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 h-[88px] border-t border-gray-200 bg-white">
+    <div className="fixed bottom-0 left-0 right-0 z-50 h-[88px] border-t border-gray-200 bg-white">
       <div className="mx-auto flex h-full max-w-md items-stretch justify-between px-3 pb-1 pt-2">
         {items.map((it) => {
           const active =

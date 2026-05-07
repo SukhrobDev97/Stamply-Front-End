@@ -44,9 +44,6 @@ const authLink = setContext((_, { headers }) => {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
 
-  // Temporary debug log (remove later).
-  console.log("TOKEN SENT:", token);
-
   return {
     headers: {
       ...headers,

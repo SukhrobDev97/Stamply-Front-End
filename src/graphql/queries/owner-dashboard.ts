@@ -8,7 +8,9 @@ export const OWNER_DASHBOARD = gql`
       pendingCount
       recentActivity {
         id
+        type
         title
+        customer_name
         createdAt
       }
       pendingVisits {
