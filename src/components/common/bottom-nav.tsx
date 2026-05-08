@@ -4,6 +4,7 @@ import type React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useAppLang } from "@/lib/use-app-lang";
+import { useAppMode } from "@/lib/app-mode";
 
 type BottomNavItem = {
   key: string;
@@ -139,6 +140,7 @@ export function BottomNav({ currentKey }: { currentKey: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const { txt } = useAppLang();
+  const { mode } = useAppMode();
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 h-[88px] border-t border-gray-200 bg-white">
@@ -183,12 +185,14 @@ export function BottomNav({ currentKey }: { currentKey: string }) {
             );
           }
 
+          const href = it.key === "home" && mode === "platform" ? "/owner" : it.href!;
+
           return (
             <button
               key={it.key}
               type="button"
               className="flex flex-1 items-center justify-center active:scale-[0.98]"
-              onClick={() => router.push(it.href!)}
+              onClick={() => router.push(href)}
             >
               {content}
             </button>

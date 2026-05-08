@@ -6,16 +6,29 @@ import { apolloClient } from "@/lib/apollo/client";
 import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
 import { CREATE_BUSINESS } from "@/graphql/mutations/createBusiness";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
+import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { Building2, MessageCircle, ShieldCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+const BUSINESS_TYPE_SUGGESTIONS = [
+  "Cafe",
+  "Restaurant",
+  "Bakery",
+  "Beauty Salon",
+  "Gym",
+];
 
 export function RequireAuth({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { ready, loginWithTelegram } = useAuth();
+  const router = useRouter();
+  const { ready, loginWithTelegram, role } = useAuth();
+  const isPlatformOwner = role === "platform_owner";
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
   const prevAuthedRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -26,9 +39,45 @@ export function RequireAuth({
   const [bizPhone, setBizPhone] = useState("");
   const [bizAddress, setBizAddress] = useState("");
   const [bizType, setBizType] = useState("");
+  const [bizTypeTouched, setBizTypeTouched] = useState(false);
   const [registerMsg, setRegisterMsg] = useState<string | null>(null);
   const [createBusiness, { loading: creatingBusiness }] = useMutation(CREATE_BUSINESS);
   const [creating, setCreating] = useState(false);
+  const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
+  const normalizedBizType = bizType.trim();
+  const isBizTypeInvalid = normalizedBizType.length === 0;
+
+  const bootstrapWorkspaces = async () => {
+    try {
+      const res = await apolloClient.query({
+        query: MY_WORKSPACES_QUERY,
+        fetchPolicy: "network-only",
+      });
+      const payload = (res.data as any)?.myWorkspaces as
+        | { items?: any[]; hasPlatformDashboard?: boolean }
+        | undefined;
+      const items = Array.isArray(payload?.items) ? payload!.items : [];
+      const hasPlatform = Boolean(payload?.hasPlatformDashboard);
+      if (items.length === 0) return;
+      if (hasPlatform || items.length > 1) {
+        router.replace("/workspaces");
+        return;
+      }
+      const only = items[0];
+      const bid = Number(only?.business_id);
+      if (Number.isFinite(bid) && bid > 0) {
+        await selectWorkspace({ variables: { businessId: bid } });
+        try {
+          await apolloClient.query({ query: PROFILE_QUERY, fetchPolicy: "network-only" });
+        } catch {
+          // ignore
+        }
+        router.replace("/");
+      }
+    } catch {
+      // ignore; fall back to existing profile-based flow
+    }
+  };
 
   useEffect(() => {
     const apply = () => {
@@ -53,9 +102,11 @@ export function RequireAuth({
 
   const txt = t[lang];
 
-  // Server validation: profile must load successfully for token to be considered valid.
+  // Platform owners have their own auth on /owner; skip PROFILE_QUERY entirely for them.
+  // Running PROFILE_QUERY as a platform_owner returns Unauthorized (no business_user record),
+  // which would trigger session invalidation and log the owner out.
   const { loading: validating, error: profileError, data: profileData } = useQuery(PROFILE_QUERY, {
-    skip: !ready || !token,
+    skip: !ready || !token || isPlatformOwner,
     fetchPolicy: "network-only",
   });
 
@@ -158,7 +209,10 @@ export function RequireAuth({
                 setLoginMsg(null);
                 void (async () => {
                   const res = await loginWithTelegram();
-                  if (res.ok) return;
+                  if (res.ok) {
+                    await bootstrapWorkspaces();
+                    return;
+                  }
                   if (res.reason === "OPEN_IN_TELEGRAM") {
                     setLoginMsg(txt.loginOpenInTelegram);
                     return;
@@ -184,6 +238,11 @@ export function RequireAuth({
         </div>
       </div>
     );
+  }
+
+  // Platform owners bypass profile/business validation — they have their own guards.
+  if (isPlatformOwner) {
+    return <>{children}</>;
   }
 
   if (validating) {
@@ -244,6 +303,10 @@ export function RequireAuth({
 
   const business = (profileData as any)?.profile?.business ?? null;
   if (!business) {
+    // If user has workspaces but none selected, go to selector instead of onboarding.
+    if (token) {
+      void bootstrapWorkspaces();
+    }
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-4 pb-24 pt-6">
@@ -276,18 +339,38 @@ export function RequireAuth({
               <input
                 value={bizType}
                 onChange={(e) => setBizType(e.target.value)}
+                onBlur={() => setBizTypeTouched(true)}
                 placeholder={txt.registerTypePh}
-                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                list="business-type-suggestions-auth"
+                className={[
+                  "w-full rounded-2xl border bg-white px-4 py-3 text-sm text-black placeholder:text-gray-400 focus:outline-none focus:ring-2",
+                  bizTypeTouched && isBizTypeInvalid
+                    ? "border-red-300 focus:ring-red-100"
+                    : "border-gray-200 focus:ring-gray-300",
+                ].join(" ")}
               />
+              <datalist id="business-type-suggestions-auth">
+                {BUSINESS_TYPE_SUGGESTIONS.map((item) => (
+                  <option key={item} value={item} />
+                ))}
+              </datalist>
+              {bizTypeTouched && isBizTypeInvalid ? (
+                <div className="text-xs font-medium text-red-600">Business type is required.</div>
+              ) : null}
             </div>
 
             {registerMsg ? <div className="mt-3 text-sm text-gray-600">{registerMsg}</div> : null}
 
             <button
               type="button"
-              disabled={creatingBusiness || !bizName.trim() || !bizPhone.trim()}
+              disabled={creatingBusiness || !bizName.trim() || !bizPhone.trim() || isBizTypeInvalid}
               onClick={() => {
                 setRegisterMsg(null);
+                setBizTypeTouched(true);
+                if (isBizTypeInvalid) {
+                  setRegisterMsg("Please enter a valid business type.");
+                  return;
+                }
                 void (async () => {
                   setCreating(true);
                   try {
@@ -297,9 +380,7 @@ export function RequireAuth({
                           name: bizName.trim(),
                           phone: bizPhone.trim(),
                           address: bizAddress.trim() || null,
-                          businessType: bizType.trim()
-                            ? bizType.trim().toUpperCase().replace(/\s+/g, "_")
-                            : null,
+                          businessType: normalizedBizType.toUpperCase().replace(/\s+/g, "_"),
                         },
                       },
                       refetchQueries: [{ query: PROFILE_QUERY }],

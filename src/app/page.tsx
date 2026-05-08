@@ -8,14 +8,17 @@ import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
+import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { useAuth } from "@/app/providers";
+import { useAppMode } from "@/lib/app-mode";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { gql, NetworkStatus } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
-import { Activity, Clock, Loader2, TrendingUp, Users } from "lucide-react";
+import { Activity, Check, ChevronDown, Plus, Shield, Clock, Loader2, TrendingUp, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -87,6 +90,29 @@ type MyCustomersQueryData = {
   myCustomers: { id: number; name?: string | null; stampCount: number }[];
 };
 
+type MyWorkspacesItem = {
+  business_id: number;
+  name: string;
+  business_type: string;
+  role: string;
+  status: string;
+  is_active_workspace: boolean;
+};
+
+type MyWorkspacesQueryData = {
+  myWorkspaces: {
+    active_business_id?: number | null;
+    canCreateBusiness: boolean;
+    hasPlatformDashboard: boolean;
+    items: MyWorkspacesItem[];
+  };
+};
+
+function isWorkspaceDeactivated(status?: string | null) {
+  const s = String(status || "").toLowerCase();
+  return s === "blocked" || s === "deactivated";
+}
+
 const APPROVE_VISIT_MUTATION = gql`
   mutation ApproveVisit($visitId: Int!) {
     approveVisit(visitId: $visitId) {
@@ -152,7 +178,9 @@ function OwnerHome() {
   const router = useRouter();
   const client = useApolloClient();
   const { ready, role } = useAuth();
+  const { mode, switchToBusiness, switchToPlatform } = useAppMode();
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+  const isPlatformOwner = role === "platform_owner";
   const [pollMs, setPollMs] = useState(5000);
 
   useEffect(() => {
@@ -193,24 +221,44 @@ function OwnerHome() {
   const txtRef = useRef(txt);
   txtRef.current = txt;
 
+  useEffect(() => {
+    if (!ready) return;
+    if (!token) return;
+    if (!isPlatformOwner) return;
+    if (mode === "business") return;
+    router.replace("/owner");
+  }, [isPlatformOwner, mode, ready, router, token]);
+
+  const { data: profileData } = useQuery<ProfileQueryData>(PROFILE_QUERY, {
+    skip: !ready || !token || isPlatformOwner,
+    fetchPolicy: "network-only",
+  });
+
+  const { data: workspacesData, refetch: refetchWorkspaces } = useQuery<MyWorkspacesQueryData>(MY_WORKSPACES_QUERY, {
+    skip: !ready || !token,
+    fetchPolicy: "network-only",
+  });
+
+  const activeBusinessId =
+    (workspacesData?.myWorkspaces?.active_business_id ?? null) ??
+    (profileData?.profile?.business?.id ?? null);
+
+  const shouldSkipBusiness = !activeBusinessId;
+
   const { data, loading, error, networkStatus: dashboardNetworkStatus } = useQuery<OwnerDashboardQueryData>(
     OWNER_DASHBOARD,
     {
-    // Don't block dashboard query on missing role; let backend authorize.
-    skip: !ready || !token,
+    // Business dashboard: only when active workspace is selected.
+    skip: !ready || !token || shouldSkipBusiness,
     fetchPolicy: "network-only",
     pollInterval: pollMs,
     notifyOnNetworkStatusChange: true,
   });
 
-  const { data: profileData } = useQuery<ProfileQueryData>(PROFILE_QUERY, {
-    skip: !ready || !token,
-    fetchPolicy: "network-only",
-  });
-
   const { data: customersData, networkStatus: customersNetworkStatus } = useQuery<MyCustomersQueryData>(
     MY_CUSTOMERS_QUERY,
     {
+    skip: shouldSkipBusiness,
     fetchPolicy: "network-only",
     pollInterval: pollMs,
     notifyOnNetworkStatusChange: true,
@@ -233,7 +281,7 @@ function OwnerHome() {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [successId, setSuccessId] = useState<number | null>(null);
 
-  const stats = data?.ownerDashboardStats;
+    const stats = data?.ownerDashboardStats;
   const pendingVisits = (stats?.pendingVisits ?? []).filter((v) => !approvedIds.includes(v.id));
   // Prefer list length so the card matches what the modal shows.
   // (Backend `pendingCount` can lag behind `pendingVisits` in some responses.)
@@ -242,13 +290,81 @@ function OwnerHome() {
     stats?.pendingCount != null
       ? Math.max(pendingCountFromList, Math.max(0, stats.pendingCount - approvedIds.length))
       : pendingCountFromList;
-  const businessName = profileData?.profile?.business?.name ?? "";
+  const activeWsItem = (workspacesData?.myWorkspaces?.items ?? []).find(
+    (w) => w.business_id === activeBusinessId || w.is_active_workspace,
+  );
+  const businessName = profileData?.profile?.business?.name ?? activeWsItem?.name ?? "";
   const businessPhone = profileData?.profile?.business?.phone ?? "";
   const businessAddress = profileData?.profile?.business?.address ?? "";
-  const businessType = profileData?.profile?.business?.businessType ?? "";
+  const businessType = profileData?.profile?.business?.businessType ?? activeWsItem?.business_type ?? "";
   const userAvatarUrlRaw = profileData?.profile?.avatar_url ?? null;
   const userAvatarUrl =
     typeof userAvatarUrlRaw === "string" && userAvatarUrlRaw.trim() ? userAvatarUrlRaw.trim() : null;
+
+  const [selectWorkspace, { loading: switchingWorkspace }] = useMutation(SELECT_WORKSPACE_MUTATION);
+
+  const workspaces = workspacesData?.myWorkspaces?.items ?? [];
+  const hasPlatformDashboard = Boolean(workspacesData?.myWorkspaces?.hasPlatformDashboard);
+  const canCreateBusiness = Boolean(workspacesData?.myWorkspaces?.canCreateBusiness);
+
+  const workspaceBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspacePos, setWorkspacePos] = useState<{ top: number; left: number; width: number }>({
+    top: 0,
+    left: 16,
+    width: 340,
+  });
+
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    const update = () => {
+      const el = workspaceBtnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const top = Math.round(r.bottom + 10);
+      const desiredLeft = Math.round(r.left);
+      const width = 340;
+      const maxLeft = Math.max(16, Math.round(window.innerWidth - width - 16));
+      const left = Math.min(Math.max(16, desiredLeft), maxLeft);
+      setWorkspacePos({ top, left, width });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [workspaceOpen]);
+
+  const [switchingTo, setSwitchingTo] = useState<number | null>(null);
+
+  const switchWorkspace = async (businessId: number) => {
+    if (switchingTo != null) return;
+    const ws = workspaces.find((item) => item.business_id === businessId);
+    if (isWorkspaceDeactivated(ws?.status)) {
+      setToast("This business is temporarily deactivated.");
+      return;
+    }
+    setSwitchingTo(businessId);
+    try {
+      await selectWorkspace({ variables: { businessId } });
+      // Set mode to "business" before navigation so the redirect effect skips /owner.
+      switchToBusiness(businessId);
+      if (!isPlatformOwner) {
+        try { await client.query({ query: PROFILE_QUERY, fetchPolicy: "network-only" }); } catch { /* ignore */ }
+      }
+      await refetchWorkspaces();
+      await Promise.all([
+        client.query({ query: OWNER_DASHBOARD, fetchPolicy: "network-only" }).catch(() => null),
+        client.query({ query: MY_CUSTOMERS_QUERY, fetchPolicy: "network-only" }).catch(() => null),
+      ]);
+      setWorkspaceOpen(false);
+      router.replace("/");
+    } finally {
+      setSwitchingTo(null);
+    }
+  };
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 1500);
@@ -312,6 +428,7 @@ function OwnerHome() {
     let cancelled = false;
 
     async function run() {
+      if (shouldSkipBusiness) return;
       const ids = (customersData?.myCustomers ?? [])
         .map((c) => Number(c.id))
         .filter((id) => Number.isFinite(id));
@@ -369,7 +486,7 @@ function OwnerHome() {
     return () => {
       cancelled = true;
     };
-  }, [client, customersData?.myCustomers]);
+  }, [client, customersData?.myCustomers, shouldSkipBusiness]);
 
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
   if (error) {
@@ -443,9 +560,15 @@ function OwnerHome() {
           <div className="flex items-center gap-3">
             <Avatar src={userAvatarUrl} fallbackText={businessName || "Business"} size={40} className="text-base" />
             <div className="flex flex-col">
-              <div className="text-lg font-semibold text-[#0F172A] leading-tight">
-                {businessName || "—"}
-              </div>
+              <button
+                type="button"
+                ref={workspaceBtnRef}
+                onClick={() => setWorkspaceOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-lg font-semibold text-[#0F172A] leading-tight active:scale-[0.99]"
+              >
+                <span className="max-w-[220px] truncate">{businessName || "—"}</span>
+                <ChevronDown className="h-4 w-4 text-gray-400" aria-hidden />
+              </button>
               <div className="text-xs text-gray-400">{businessType || "—"}</div>
             </div>
           </div>
@@ -830,6 +953,134 @@ function OwnerHome() {
 
       {loadOverlayMounted ? (
         <PremiumDashboardLoader fading={loadOverlayFadeOut} hint={txt.homeDashboardLoadHint} />
+      ) : null}
+
+      {workspaceOpen ? (
+        <>
+          <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setWorkspaceOpen(false)} />
+          <div
+            className={[
+              "fixed z-50 origin-top-left rounded-[24px] border border-gray-200/80",
+              "bg-white/85 backdrop-blur-xl shadow-[0_18px_48px_rgba(15,23,42,0.16)]",
+              "w-[340px] max-w-[calc(100vw-32px)]",
+              "transition duration-150 ease-out",
+            ].join(" ")}
+            style={{
+              top: `${workspacePos.top}px`,
+              left: `${workspacePos.left}px`,
+              transform: "scale(1)",
+            }}
+          >
+            <div className="px-4 pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-900">Workspaces</div>
+                  <div className="mt-0.5 text-xs text-gray-500">Switch or create workspace</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceOpen(false)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-[0.99]"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 max-h-[60vh] overflow-auto px-2 pb-2">
+              {workspaces.length === 0 ? (
+                <div className="px-3 py-6 text-center">
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-700">
+                    <Shield className="h-5 w-5" aria-hidden />
+                  </div>
+                  <div className="mt-3 text-sm font-semibold text-gray-900">No workspaces yet</div>
+                  <div className="mt-1 text-xs text-gray-500">Create a workspace to continue.</div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {hasPlatformDashboard ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        switchToPlatform();
+                        setWorkspaceOpen(false);
+                        router.replace("/owner");
+                      }}
+                      className="flex h-[56px] w-full items-center justify-between gap-3 rounded-2xl px-3 text-left transition hover:bg-gray-50 active:scale-[0.99]"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-700">
+                          <Shield className="h-4 w-4" aria-hidden />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-gray-900">Platform Dashboard</div>
+                          <div className="truncate text-xs text-gray-500">Admin</div>
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-700">
+                        Internal
+                      </span>
+                    </button>
+                  ) : null}
+
+                  {workspaces.map((w) => {
+                    const active = Boolean(w.is_active_workspace);
+                    const isSwitching = switchingTo === w.business_id;
+                    const isDeactivated = isWorkspaceDeactivated(w.status);
+                    return (
+                      <button
+                        key={w.business_id}
+                        type="button"
+                        disabled={switchingTo != null}
+                        onClick={() => void switchWorkspace(Number(w.business_id))}
+                        className={[
+                          "flex h-[60px] w-full items-center justify-between gap-3 rounded-2xl px-3 text-left transition active:scale-[0.99] disabled:opacity-60",
+                          isDeactivated ? "opacity-65" : "",
+                          active ? "bg-gray-50 ring-1 ring-gray-200" : "hover:bg-gray-50",
+                        ].join(" ")}
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-700">
+                            {isSwitching
+                              ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                              : <span className="text-sm font-bold">{getFirstLetter(w.name)}</span>
+                            }
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-gray-900">{w.name}</div>
+                            <div className="truncate text-xs text-gray-500">
+                              {isSwitching
+                                ? "Switching…"
+                                : isDeactivated
+                                  ? "Temporarily deactivated"
+                                  : w.role}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {active && !isSwitching ? <Check className="h-4 w-4 text-gray-900" aria-hidden /> : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-200/70 p-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceOpen(false);
+                  router.push("/create-business");
+                }}
+                className="w-full rounded-xl bg-[linear-gradient(135deg,rgba(2,132,199,0.16)_0%,rgba(15,23,42,0.06)_100%)] px-4 py-3 text-sm font-semibold text-gray-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] hover:bg-[linear-gradient(135deg,rgba(2,132,199,0.20)_0%,rgba(15,23,42,0.08)_100%)] active:scale-[0.99]"
+              >
+                + Create workspace
+              </button>
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );

@@ -13,6 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppModeProvider } from "@/lib/app-mode";
 
 type AuthState = {
   accessToken: string | null;
@@ -96,7 +97,13 @@ function AuthGate({
       localStorage.setItem("accessToken", token);
       setAccessToken(token);
       setIsAuthenticated(true);
-      setRole(typeof payload?.role === "string" ? payload.role : null);
+      setRole(
+        typeof payload?.role === "string"
+          ? payload.role
+          : typeof payload?.global_role === "string"
+            ? payload.global_role
+            : null
+      );
       setUserId(payload?.sub != null ? String(payload.sub) : null);
       setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
       // Ensure business context (profile) is fresh right after login.
@@ -169,7 +176,12 @@ export function Providers({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return null;
     const token = localStorage.getItem("accessToken");
     const payload = token ? decodeJwtPayload(token) : null;
-    return typeof payload?.role === "string" ? payload.role : null;
+    if (!payload) return null;
+    return typeof payload.role === "string"
+      ? payload.role
+      : typeof payload.global_role === "string"
+        ? payload.global_role
+        : null;
   });
   const [userId, setUserId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -196,7 +208,13 @@ export function Providers({ children }: { children: ReactNode }) {
 
     setAccessToken(savedToken);
     setIsAuthenticated(true);
-    setRole(typeof payload?.role === "string" ? payload.role : null);
+    setRole(
+      typeof payload?.role === "string"
+        ? payload.role
+        : typeof payload?.global_role === "string"
+          ? payload.global_role
+          : null
+    );
     setUserId(payload?.sub != null ? String(payload.sub) : null);
     setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
     setReady(true);
@@ -217,24 +235,26 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ApolloProvider client={apolloClient}>
-      <AuthGate
-        accessToken={accessToken}
-        isAuthenticated={isAuthenticated}
-        ready={ready}
-        role={role}
-        userId={userId}
-        telegramId={telegramId}
-        setAccessToken={setAccessToken}
-        setIsAuthenticated={setIsAuthenticated}
-        setReady={setReady}
-        setRole={setRole}
-        setUserId={setUserId}
-        setTelegramId={setTelegramId}
-        decodeJwtPayload={decodeJwtPayload}
-      >
-        {children}
-      </AuthGate>
-    </ApolloProvider>
+    <AppModeProvider initialRole={role}>
+      <ApolloProvider client={apolloClient}>
+        <AuthGate
+          accessToken={accessToken}
+          isAuthenticated={isAuthenticated}
+          ready={ready}
+          role={role}
+          userId={userId}
+          telegramId={telegramId}
+          setAccessToken={setAccessToken}
+          setIsAuthenticated={setIsAuthenticated}
+          setReady={setReady}
+          setRole={setRole}
+          setUserId={setUserId}
+          setTelegramId={setTelegramId}
+          decodeJwtPayload={decodeJwtPayload}
+        >
+          {children}
+        </AuthGate>
+      </ApolloProvider>
+    </AppModeProvider>
   );
 }
