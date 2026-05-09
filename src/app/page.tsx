@@ -2,8 +2,8 @@
 
 import { BottomNav } from "@/components/common/bottom-nav";
 import { Avatar } from "@/components/common/avatar";
-import { PremiumDashboardLoader } from "@/components/common/premium-dashboard-loader";
 import { RequireAuth } from "@/components/common/require-auth";
+import { HomeDashboardSkeleton } from "@/components/home/home-dashboard-skeleton";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
@@ -15,7 +15,7 @@ import { useAppMode } from "@/lib/app-mode";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
-import { gql, NetworkStatus } from "@apollo/client";
+import { gql } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import { Activity, Check, ChevronDown, Plus, Shield, Clock, Loader2, TrendingUp, Users } from "lucide-react";
@@ -179,7 +179,18 @@ function OwnerHome() {
   const client = useApolloClient();
   const { ready, role } = useAuth();
   const { mode, switchToBusiness, switchToPlatform } = useAppMode();
-  const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+  const [clientReady, setClientReady] = useState(false);
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
+  const token = useMemo(() => {
+    if (!clientReady || typeof window === "undefined") return null;
+    try {
+      return localStorage.getItem("accessToken");
+    } catch {
+      return null;
+    }
+  }, [clientReady]);
   const isPlatformOwner = role === "platform_owner";
   const [pollMs, setPollMs] = useState(5000);
 
@@ -223,21 +234,25 @@ function OwnerHome() {
 
   useEffect(() => {
     if (!ready) return;
+    if (!clientReady) return;
     if (!token) return;
     if (!isPlatformOwner) return;
     if (mode === "business") return;
     router.replace("/owner");
-  }, [isPlatformOwner, mode, ready, router, token]);
+  }, [clientReady, isPlatformOwner, mode, ready, router, token]);
 
   const { data: profileData } = useQuery<ProfileQueryData>(PROFILE_QUERY, {
     skip: !ready || !token || isPlatformOwner,
     fetchPolicy: "network-only",
   });
 
-  const { data: workspacesData, refetch: refetchWorkspaces } = useQuery<MyWorkspacesQueryData>(MY_WORKSPACES_QUERY, {
-    skip: !ready || !token,
-    fetchPolicy: "network-only",
-  });
+  const { data: workspacesData, loading: workspacesLoading, refetch: refetchWorkspaces } = useQuery<MyWorkspacesQueryData>(
+    MY_WORKSPACES_QUERY,
+    {
+      skip: !ready || !token,
+      fetchPolicy: "network-only",
+    },
+  );
 
   const activeBusinessId =
     (workspacesData?.myWorkspaces?.active_business_id ?? null) ??
@@ -245,7 +260,7 @@ function OwnerHome() {
 
   const shouldSkipBusiness = !activeBusinessId;
 
-  const { data, loading, error, networkStatus: dashboardNetworkStatus } = useQuery<OwnerDashboardQueryData>(
+  const { data, error } = useQuery<OwnerDashboardQueryData>(
     OWNER_DASHBOARD,
     {
     // Business dashboard: only when active workspace is selected.
@@ -255,7 +270,7 @@ function OwnerHome() {
     notifyOnNetworkStatusChange: true,
   });
 
-  const { data: customersData, networkStatus: customersNetworkStatus } = useQuery<MyCustomersQueryData>(
+  const { data: customersData } = useQuery<MyCustomersQueryData>(
     MY_CUSTOMERS_QUERY,
     {
     skip: shouldSkipBusiness,
@@ -301,7 +316,7 @@ function OwnerHome() {
   const userAvatarUrl =
     typeof userAvatarUrlRaw === "string" && userAvatarUrlRaw.trim() ? userAvatarUrlRaw.trim() : null;
 
-  const [selectWorkspace, { loading: switchingWorkspace }] = useMutation(SELECT_WORKSPACE_MUTATION);
+  const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
 
   const workspaces = workspacesData?.myWorkspaces?.items ?? [];
   const hasPlatformDashboard = Boolean(workspacesData?.myWorkspaces?.hasPlatformDashboard);
@@ -370,35 +385,6 @@ function OwnerHome() {
     const timer = window.setTimeout(() => setToast(null), 1500);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  // Avoid "automatic loading" flashes during poll/refetch; only block on first load.
-  const initialLoading =
-    (dashboardNetworkStatus === NetworkStatus.loading && !data) ||
-    (customersNetworkStatus === NetworkStatus.loading && !customersData);
-
-  const dashboardBlocking = !ready || initialLoading;
-  const showDashboardOverlay = dashboardBlocking && !error;
-  const [loadOverlayMounted, setLoadOverlayMounted] = useState(true);
-  const [loadOverlayFadeOut, setLoadOverlayFadeOut] = useState(false);
-
-  useEffect(() => {
-    if (showDashboardOverlay) {
-      setLoadOverlayMounted(true);
-      setLoadOverlayFadeOut(false);
-      return;
-    }
-    if (error) {
-      setLoadOverlayMounted(false);
-      setLoadOverlayFadeOut(false);
-      return;
-    }
-    setLoadOverlayFadeOut(true);
-    const t = window.setTimeout(() => {
-      setLoadOverlayMounted(false);
-      setLoadOverlayFadeOut(false);
-    }, 200);
-    return () => window.clearTimeout(t);
-  }, [showDashboardOverlay, error]);
 
   const recentActivity = stats?.recentActivity ?? [];
   const customerNameById = new Map<number, string>(
@@ -488,6 +474,16 @@ function OwnerHome() {
     };
   }, [client, customersData?.myCustomers, shouldSkipBusiness]);
 
+  const workspacesHydrated = clientReady && ready && !!token && !workspacesLoading;
+  const showDashboardSkeleton =
+    !error &&
+    clientReady &&
+    ready &&
+    !!token &&
+    (workspacesLoading || (!shouldSkipBusiness && (!data || customersData == null)));
+
+  const noActiveWorkspace = workspacesHydrated && shouldSkipBusiness;
+
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
   if (error) {
     return (
@@ -553,8 +549,78 @@ function OwnerHome() {
     }
   };
 
+  const langSwitcher = (
+    <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
+      <button
+        type="button"
+        onClick={() => setLangPersist("uz")}
+        className={[
+          "rounded-full px-3 py-1.5 transition-colors",
+          lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+        ].join(" ")}
+      >
+        UZ
+      </button>
+      <button
+        type="button"
+        onClick={() => setLangPersist("ru")}
+        className={[
+          "rounded-full px-3 py-1.5 transition-colors",
+          lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
+        ].join(" ")}
+      >
+        RU
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-dvh bg-[#f7f7f8] text-black">
+      {showDashboardSkeleton ? (
+        <HomeDashboardSkeleton />
+      ) : noActiveWorkspace ? (
+        <>
+          <header className="sticky top-0 z-20 border-b border-gray-200 bg-[#f7f7f8]/80 backdrop-blur">
+            <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3">
+              <button
+                type="button"
+                ref={workspaceBtnRef}
+                onClick={() => setWorkspaceOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0F172A] shadow-sm active:scale-[0.99]"
+              >
+                <Shield className="h-4 w-4 text-gray-600" aria-hidden />
+                Workspaces
+              </button>
+              {langSwitcher}
+            </div>
+          </header>
+          <div className="mx-auto max-w-md px-4 pt-12 pb-[calc(88px+env(safe-area-inset-bottom,0px)+28px)] text-center">
+            {workspaces.length === 0 ? (
+              <>
+                <p className="text-sm text-gray-600">Create a business to open your dashboard.</p>
+                <Link
+                  href="/create-business"
+                  className="mt-5 inline-flex items-center justify-center rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
+                >
+                  Create business
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600">Choose a workspace to view your dashboard.</p>
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceOpen(true)}
+                  className="mt-5 inline-flex w-full max-w-xs items-center justify-center rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
+                >
+                  Choose workspace
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      ) : (
+      <>
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-[#f7f7f8]/80 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
@@ -566,37 +632,14 @@ function OwnerHome() {
                 onClick={() => setWorkspaceOpen((v) => !v)}
                 className="inline-flex items-center gap-1.5 text-lg font-semibold text-[#0F172A] leading-tight active:scale-[0.99]"
               >
-                <span className="max-w-[220px] truncate">{businessName || "—"}</span>
+                <span className="max-w-[220px] truncate">{businessName || "\u00A0"}</span>
                 <ChevronDown className="h-4 w-4 text-gray-400" aria-hidden />
               </button>
-              <div className="text-xs text-gray-400">{businessType || "—"}</div>
+              <div className="text-xs text-gray-400">{businessType || "\u00A0"}</div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setLangPersist("uz")}
-                className={[
-                  "rounded-full px-3 py-1.5 transition-colors",
-                  lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-                ].join(" ")}
-              >
-                UZ
-              </button>
-              <button
-                type="button"
-                onClick={() => setLangPersist("ru")}
-                className={[
-                  "rounded-full px-3 py-1.5 transition-colors",
-                  lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-                ].join(" ")}
-              >
-                RU
-              </button>
-            </div>
-          </div>
+          <div className="flex items-center gap-2">{langSwitcher}</div>
         </div>
       </header>
 
@@ -811,10 +854,12 @@ function OwnerHome() {
           </button>
         </div>
       </div>
+      </>
+      )}
 
       <BottomNav currentKey="home" />
 
-      {pendingModal.show ? (
+      {!showDashboardSkeleton && !noActiveWorkspace && pendingModal.show ? (
         <div
           className={pendingModal.overlayClassName}
           onTransitionEnd={pendingModal.onOverlayTransitionEnd}
@@ -888,7 +933,7 @@ function OwnerHome() {
         </div>
       ) : null}
 
-      {activityModal.show ? (
+      {!showDashboardSkeleton && !noActiveWorkspace && activityModal.show ? (
         <div
           className={activityModal.overlayClassName}
           onTransitionEnd={activityModal.onOverlayTransitionEnd}
@@ -951,11 +996,7 @@ function OwnerHome() {
         </div>
       ) : null}
 
-      {loadOverlayMounted ? (
-        <PremiumDashboardLoader fading={loadOverlayFadeOut} hint={txt.homeDashboardLoadHint} />
-      ) : null}
-
-      {workspaceOpen ? (
+      {!showDashboardSkeleton && workspaceOpen ? (
         <>
           <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setWorkspaceOpen(false)} />
           <div

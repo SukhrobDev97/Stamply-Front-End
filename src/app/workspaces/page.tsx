@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/app/providers";
 import { useAppMode } from "@/lib/app-mode";
+import { WorkspacesPageSkeleton } from "@/components/workspaces/workspaces-page-skeleton";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { useMutation, useQuery } from "@apollo/client/react";
@@ -44,18 +45,32 @@ export default function WorkspacesPage() {
   const router = useRouter();
   const { ready, isAuthenticated } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
-  const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+  const [clientReady, setClientReady] = useState(false);
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
+
+  const token = useMemo(() => {
+    if (!clientReady || typeof window === "undefined") return null;
+    try {
+      return localStorage.getItem("accessToken");
+    } catch {
+      return null;
+    }
+  }, [clientReady]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !clientReady) return;
     if (!isAuthenticated || !token) router.replace("/");
-  }, [isAuthenticated, ready, router, token]);
+  }, [clientReady, isAuthenticated, ready, router, token]);
 
-  const canQuery = ready && isAuthenticated && !!token;
+  const canQuery = clientReady && ready && isAuthenticated && !!token;
   const { data, loading, error, refetch } = useQuery<MyWorkspacesQueryData>(MY_WORKSPACES_QUERY, {
     skip: !canQuery,
     fetchPolicy: "network-only",
   });
+
+  const awaitingFirstWorkspacePayload = canQuery && loading && data === undefined;
 
   const [selectWorkspace, { loading: selecting }] = useMutation(SELECT_WORKSPACE_MUTATION);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -77,7 +92,9 @@ export default function WorkspacesPage() {
     return out;
   }, [items]);
 
-  if (!canQuery) return null;
+  if (!clientReady || !ready || !canQuery || awaitingFirstWorkspacePayload) {
+    return <WorkspacesPageSkeleton />;
+  }
 
   return (
     <div className="min-h-dvh bg-[#F5F7FB] text-slate-900">
@@ -109,11 +126,7 @@ export default function WorkspacesPage() {
             </button>
           ) : null}
 
-          {loading ? (
-            <div className="rounded-[24px] border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
-              Loading…
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="rounded-[24px] border border-red-200 bg-white p-5 text-sm text-red-600 shadow-sm">
               {error.message}
             </div>
