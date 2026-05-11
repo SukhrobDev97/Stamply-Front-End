@@ -1,17 +1,20 @@
 "use client";
 
+import { useAppLang } from "@/lib/use-app-lang";
+
 /**
  * Layout-matched skeleton for /workspaces (Select workspace).
  * Mirrors WorkspacesPage shell to avoid CLS when list hydrates.
  */
 export function WorkspacesPageSkeleton() {
+  const { txt } = useAppLang();
   return (
     <div
       className="min-h-dvh animate-pulse bg-[#F5F7FB] motion-reduce:animate-none"
       role="status"
       aria-busy="true"
       aria-live="polite"
-      aria-label="Loading workspaces"
+      aria-label={txt.workspacesLoadingAria}
     >
       <div className="mx-auto max-w-md px-4 pb-24 pt-8">
         <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm">

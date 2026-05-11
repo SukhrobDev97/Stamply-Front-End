@@ -4,6 +4,10 @@ export const OWNER_DASHBOARD = gql`
   query OwnerDashboardStats {
     ownerDashboardStats {
       visitsToday
+      todayVisits
+      yesterdayVisits
+      percentChange
+      trendDirection
       totalCustomers
       pendingCount
       recentActivity {

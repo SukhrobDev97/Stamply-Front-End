@@ -9,8 +9,8 @@ import { useAuth } from "@/app/providers";
 import { useAppLang } from "@/lib/use-app-lang";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 type Customer = {
   id: number;
@@ -74,7 +74,6 @@ function RewardsPageFallback() {
 function RewardsPageInner() {
   const router = useRouter();
   const { txt } = useAppLang();
-  const searchParams = useSearchParams();
   const client = useApolloClient();
   const { ready, isAuthenticated } = useAuth();
   const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
@@ -186,22 +185,6 @@ function RewardsPageInner() {
       // keep simple (no new toasts)
     }
   };
-
-  const autoRedeemedRef = useRef<number | null>(null);
-  useEffect(() => {
-    const raw = searchParams?.get("rewardId");
-    const rewardId = raw ? Number(raw) : Number.NaN;
-    if (!Number.isFinite(rewardId)) return;
-    if (autoRedeemedRef.current === rewardId) return;
-    if (loading || rowsLoading || redeeming) return;
-
-    const row = rows.find((r) => r.id === rewardId);
-    if (!row) return;
-    if (!isUnlocked(row.status)) return;
-
-    autoRedeemedRef.current = rewardId;
-    void onRedeem(rewardId);
-  }, [loading, rowsLoading, redeeming, rows, searchParams]);
 
   return (
     <div className="min-h-dvh bg-[#f7f7f8] text-black">

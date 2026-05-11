@@ -1,7 +1,9 @@
 "use client";
 
 import { useAuth } from "@/app/providers";
+import { t, type ProfileLang } from "@/app/profile/copy";
 import { useAppMode } from "@/lib/app-mode";
+import { useAppLang } from "@/lib/use-app-lang";
 import { WorkspacesPageSkeleton } from "@/components/workspaces/workspaces-page-skeleton";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
@@ -30,19 +32,22 @@ type MyWorkspacesQueryData = {
   myWorkspaces: MyWorkspacesPayload;
 };
 
-function statusBadge(status: string) {
+type Txt = (typeof t)[ProfileLang];
+
+function statusBadge(status: string, txt: Txt) {
   const s = String(status || "").toLowerCase();
-  if (s === "active") return { cls: "bg-emerald-50 text-emerald-800 ring-emerald-100", label: "Active" };
-  if (s === "trial") return { cls: "bg-amber-50 text-amber-900 ring-amber-100", label: "Trial" };
-  if (s === "expired") return { cls: "bg-red-50 text-red-800 ring-red-100", label: "Expired" };
+  if (s === "active") return { cls: "bg-emerald-50 text-emerald-800 ring-emerald-100", label: txt.workspacesStatusActive };
+  if (s === "trial") return { cls: "bg-amber-50 text-amber-900 ring-amber-100", label: txt.workspacesStatusTrial };
+  if (s === "expired") return { cls: "bg-red-50 text-red-800 ring-red-100", label: txt.workspacesStatusExpired };
   if (s === "blocked" || s === "deactivated") {
-    return { cls: "bg-slate-100 text-slate-700 ring-slate-200", label: "Deactivated" };
+    return { cls: "bg-slate-100 text-slate-700 ring-slate-200", label: txt.workspacesStatusDeactivated };
   }
   return { cls: "bg-slate-100 text-slate-800 ring-slate-200", label: status || "—" };
 }
 
 export default function WorkspacesPage() {
   const router = useRouter();
+  const { txt } = useAppLang();
   const { ready, isAuthenticated } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
   const [clientReady, setClientReady] = useState(false);
@@ -100,8 +105,8 @@ export default function WorkspacesPage() {
     <div className="min-h-dvh bg-[#F5F7FB] text-slate-900">
       <div className="mx-auto max-w-md px-4 pb-24 pt-8">
         <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
-          <div className="text-lg font-semibold tracking-[-0.02em]">Select workspace</div>
-          <div className="mt-1 text-sm text-slate-500">Choose a business to continue.</div>
+          <div className="text-lg font-semibold tracking-[-0.02em]">{txt.workspacesTitle}</div>
+          <div className="mt-1 text-sm text-slate-500">{txt.workspacesSubtitle}</div>
         </div>
 
         <div className="mt-5 space-y-3">
@@ -115,12 +120,12 @@ export default function WorkspacesPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Shield className="h-4 w-4 text-slate-700" aria-hidden />
-                    Platform Dashboard
+                    {txt.workspacesPlatformTitle}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">Admin access</div>
+                  <div className="mt-1 text-xs text-slate-500">{txt.workspacesPlatformSubtitle}</div>
                 </div>
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
-                  Internal
+                  {txt.workspacesInternal}
                 </span>
               </div>
             </button>
@@ -133,7 +138,7 @@ export default function WorkspacesPage() {
           ) : (
             <>
               {sorted.map((w) => {
-                const badge = statusBadge(w.status);
+                const badge = statusBadge(w.status, txt);
                 const isActive = w.is_active_workspace;
                 const isBusy = selecting && busyId === w.business_id;
                 const normalizedStatus = String(w.status || "").toLowerCase();
@@ -145,7 +150,7 @@ export default function WorkspacesPage() {
                     disabled={selecting}
                     onClick={() => {
                       if (isDeactivated) {
-                        setToast("This business is temporarily deactivated.");
+                        setToast(txt.workspacesDeactivatedToast);
                         return;
                       }
                       void (async () => {
@@ -184,7 +189,7 @@ export default function WorkspacesPage() {
                         {isActive ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white">
                             <Check className="h-3.5 w-3.5" aria-hidden />
-                            Active
+                            {txt.workspacesActive}
                           </span>
                         ) : null}
                         <span className={["rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1", badge.cls].join(" ")}>
@@ -192,7 +197,7 @@ export default function WorkspacesPage() {
                         </span>
                       </div>
                     </div>
-                    {isBusy ? <div className="mt-3 text-xs font-semibold text-slate-500">Selecting…</div> : null}
+                    {isBusy ? <div className="mt-3 text-xs font-semibold text-slate-500">{txt.workspacesSelecting}</div> : null}
                   </button>
                 );
               })}
@@ -207,7 +212,7 @@ export default function WorkspacesPage() {
                     <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 ring-1 ring-slate-200">
                       <Plus className="h-4 w-4" aria-hidden />
                     </div>
-                    <div className="text-sm font-semibold">Create Business</div>
+                    <div className="text-sm font-semibold">{txt.workspacesCreateBusiness}</div>
                   </div>
                 </button>
               ) : null}

@@ -18,7 +18,20 @@ import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { gql } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
-import { Activity, Check, ChevronDown, Plus, Shield, Clock, Loader2, TrendingUp, Users } from "lucide-react";
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Clock,
+  Loader2,
+  Minus,
+  Plus,
+  Shield,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -67,6 +80,10 @@ function isRedeemedReward(status: string) {
 
 type OwnerDashboardStatsData = {
   visitsToday: number;
+  todayVisits?: number;
+  yesterdayVisits?: number;
+  percentChange?: number | null;
+  trendDirection?: string | null;
   totalCustomers: number;
   rewardsIssued?: number;
   recentRewards?: RecentRewardRow[];
@@ -149,6 +166,17 @@ function stripCustomerPrefix(title: string) {
     .replace(/^[:\-–—>]+/, "")
     .replace(/^\s*(?:→|:|-|–|—)\s*/, "")
     .trim();
+}
+
+function formatVisitDeltaPercent(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return "0%";
+  const r = Math.round(pct * 100) / 100;
+  if (r === 0 || Object.is(r, -0)) return "0%";
+  return `${r > 0 ? "+" : ""}${r}%`;
+}
+
+function visitTrendDir(stats: OwnerDashboardStatsData | undefined): string {
+  return String(stats?.trendDirection ?? "neutral").toLowerCase();
 }
 
 function translateActivityDescription(raw: string, txt: (typeof t)[ProfileLang]): string {
@@ -297,6 +325,7 @@ function OwnerHome() {
   const [successId, setSuccessId] = useState<number | null>(null);
 
     const stats = data?.ownerDashboardStats;
+  const visitDir = visitTrendDir(stats);
   const pendingVisits = (stats?.pendingVisits ?? []).filter((v) => !approvedIds.includes(v.id));
   // Prefer list length so the card matches what the modal shows.
   // (Backend `pendingCount` can lag behind `pendingVisits` in some responses.)
@@ -358,7 +387,7 @@ function OwnerHome() {
     if (switchingTo != null) return;
     const ws = workspaces.find((item) => item.business_id === businessId);
     if (isWorkspaceDeactivated(ws?.status)) {
-      setToast("This business is temporarily deactivated.");
+      setToast(txt.workspacesDeactivatedToast);
       return;
     }
     setSwitchingTo(businessId);
@@ -589,7 +618,7 @@ function OwnerHome() {
                 className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0F172A] shadow-sm active:scale-[0.99]"
               >
                 <Shield className="h-4 w-4 text-gray-600" aria-hidden />
-                Workspaces
+                {txt.homeWorkspacesNav}
               </button>
               {langSwitcher}
             </div>
@@ -597,23 +626,23 @@ function OwnerHome() {
           <div className="mx-auto max-w-md px-4 pt-12 pb-[calc(88px+env(safe-area-inset-bottom,0px)+28px)] text-center">
             {workspaces.length === 0 ? (
               <>
-                <p className="text-sm text-gray-600">Create a business to open your dashboard.</p>
+                <p className="text-sm text-gray-600">{txt.homeNoWorkspaceNeedBusiness}</p>
                 <Link
                   href="/create-business"
                   className="mt-5 inline-flex items-center justify-center rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
                 >
-                  Create business
+                  {txt.workspacesCreateBusiness}
                 </Link>
               </>
             ) : (
               <>
-                <p className="text-sm text-gray-600">Choose a workspace to view your dashboard.</p>
+                <p className="text-sm text-gray-600">{txt.workspacesSubtitle}</p>
                 <button
                   type="button"
                   onClick={() => setWorkspaceOpen(true)}
                   className="mt-5 inline-flex w-full max-w-xs items-center justify-center rounded-2xl bg-[#0284C7] px-5 py-3 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
                 >
-                  Choose workspace
+                  {txt.homeWorkspacePick}
                 </button>
               </>
             )}
@@ -732,12 +761,22 @@ function OwnerHome() {
               {txt.homeVisitsToday}
             </span>
             <span className="mt-1 text-[58px] font-extrabold leading-none tracking-[-0.055em] text-white tabular-nums">
-              {Number(stats?.visitsToday ?? 0)}
+              {Number(stats?.todayVisits ?? stats?.visitsToday ?? 0)}
             </span>
             <span className="mt-3 inline-flex w-fit items-center gap-2 rounded-full bg-white/18 px-3 py-1.5 text-[11px] font-semibold text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-md">
-              <span className="text-base leading-none text-white">↑</span>
-              <span className="text-[12px] font-extrabold text-white">0%</span>
-              <span className="h-1 w-1 rounded-full bg-white/55" />
+              <span className="flex shrink-0 items-center text-white">
+                {visitDir === "down" ? (
+                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
+                ) : visitDir === "up" ? (
+                  <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
+                ) : (
+                  <Minus className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
+                )}
+              </span>
+              <span className="text-[12px] font-extrabold tabular-nums text-white">
+                {formatVisitDeltaPercent(stats?.percentChange)}
+              </span>
+              <span className="h-1 w-1 shrink-0 rounded-full bg-white/55" />
               <span className="leading-none">{txt.homeVsYesterday}</span>
             </span>
           </div>
@@ -1015,8 +1054,8 @@ function OwnerHome() {
             <div className="px-4 pt-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-gray-900">Workspaces</div>
-                  <div className="mt-0.5 text-xs text-gray-500">Switch or create workspace</div>
+                  <div className="text-sm font-semibold text-gray-900">{txt.workspacesTitle}</div>
+                  <div className="mt-0.5 text-xs text-gray-500">{txt.homeWorkspaceDropdownHint}</div>
                 </div>
                 <button
                   type="button"
@@ -1034,8 +1073,8 @@ function OwnerHome() {
                   <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-700">
                     <Shield className="h-5 w-5" aria-hidden />
                   </div>
-                  <div className="mt-3 text-sm font-semibold text-gray-900">No workspaces yet</div>
-                  <div className="mt-1 text-xs text-gray-500">Create a workspace to continue.</div>
+                  <div className="mt-3 text-sm font-semibold text-gray-900">{txt.homeWorkspaceEmptyTitle}</div>
+                  <div className="mt-1 text-xs text-gray-500">{txt.homeWorkspaceEmptyBody}</div>
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -1054,12 +1093,12 @@ function OwnerHome() {
                           <Shield className="h-4 w-4" aria-hidden />
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-gray-900">Platform Dashboard</div>
-                          <div className="truncate text-xs text-gray-500">Admin</div>
+                          <div className="truncate text-sm font-semibold text-gray-900">{txt.workspacesPlatformTitle}</div>
+                          <div className="truncate text-xs text-gray-500">{txt.workspacesPlatformSubtitle}</div>
                         </div>
                       </div>
                       <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-700">
-                        Internal
+                        {txt.workspacesInternal}
                       </span>
                     </button>
                   ) : null}
@@ -1091,9 +1130,9 @@ function OwnerHome() {
                             <div className="truncate text-sm font-semibold text-gray-900">{w.name}</div>
                             <div className="truncate text-xs text-gray-500">
                               {isSwitching
-                                ? "Switching…"
+                                ? txt.workspacesSelecting
                                 : isDeactivated
-                                  ? "Temporarily deactivated"
+                                  ? txt.homeWorkspaceInactiveShort
                                   : w.role}
                             </div>
                           </div>
@@ -1117,7 +1156,7 @@ function OwnerHome() {
                 }}
                 className="w-full rounded-xl bg-[linear-gradient(135deg,rgba(2,132,199,0.16)_0%,rgba(15,23,42,0.06)_100%)] px-4 py-3 text-sm font-semibold text-gray-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] hover:bg-[linear-gradient(135deg,rgba(2,132,199,0.20)_0%,rgba(15,23,42,0.08)_100%)] active:scale-[0.99]"
               >
-                + Create workspace
+                {`+ ${txt.workspacesCreateBusiness}`}
               </button>
             </div>
           </div>
