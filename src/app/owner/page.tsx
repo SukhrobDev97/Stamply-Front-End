@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "@apollo/client/react";
 import { OWNER_ME_QUERY } from "@/graphql/queries/ownerMe.query";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { PLATFORM_BUSINESSES_QUERY } from "@/graphql/queries/platformBusinesses.query";
+import { PLATFORM_DASHBOARD_STATS_QUERY } from "@/graphql/queries/platformDashboardStats.query";
 import { PLATFORM_BUSINESS_QUERY } from "@/graphql/queries/platformBusiness.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import {
@@ -35,16 +36,32 @@ import { useEffect, useMemo, useState } from "react";
 import { useAppMode } from "@/lib/app-mode";
 
 type RawStatus = string;
-type DisplayStatus = "active" | "deactivated";
+type DisplayStatus = "active" | "trial" | "deactivated";
 
-function toDisplay(s: RawStatus): DisplayStatus {
-  if (s === "ACTIVE" || s === "active") return "active";
+function toDisplay(s: RawStatus, trialEndsAt?: string | null): DisplayStatus {
+  const sl = String(s || "").toLowerCase();
+  if (sl === "trial") {
+    if (trialEndsAt) {
+      const end = new Date(trialEndsAt).getTime();
+      if (Number.isFinite(end) && end <= Date.now()) return "deactivated";
+    }
+    return "trial";
+  }
+  if (sl === "active" || sl === "ACTIVE") {
+    if (trialEndsAt) {
+      const end = new Date(trialEndsAt).getTime();
+      if (Number.isFinite(end) && end > Date.now()) return "trial";
+    }
+    return "active";
+  }
   return "deactivated";
 }
 
-function toFilterValue(d: DisplayStatus): string {
-  if (d === "deactivated") return "deactivated";
-  return "active";
+function toLifecycleEnum(d: "all" | DisplayStatus): "ALL" | "ACTIVE" | "TRIAL" | "DEACTIVATED" {
+  if (d === "all") return "ALL";
+  if (d === "active") return "ACTIVE";
+  if (d === "trial") return "TRIAL";
+  return "DEACTIVATED";
 }
 
 type PlatformBusinessRow = {
@@ -68,6 +85,15 @@ type PlatformBusinessesPage = {
 
 type PlatformBusinessesQueryData = {
   platformBusinesses: PlatformBusinessesPage;
+};
+
+type PlatformDashboardStatsQueryData = {
+  platformDashboardStats: {
+    totalBusinesses: number;
+    activeBusinesses: number;
+    trialBusinesses: number;
+    deactivatedBusinesses: number;
+  };
 };
 
 type PlatformBusinessDetail = {
@@ -108,11 +134,12 @@ function daysLeft(v?: string | null) {
 
 const STATUS_META: Record<DisplayStatus, { label: string; cls: string }> = {
   active:      { label: "Active",      cls: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
+  trial:       { label: "Trial",       cls: "bg-amber-50 text-amber-900 ring-amber-200"     },
   deactivated: { label: "Deactivated", cls: "bg-slate-100 text-slate-700  ring-slate-200"    },
 };
 
-function StatusBadge({ raw }: { raw: RawStatus }) {
-  const d = toDisplay(raw);
+function StatusBadge({ raw, trialEndsAt }: { raw: RawStatus; trialEndsAt?: string | null }) {
+  const d = toDisplay(raw, trialEndsAt);
   const m = STATUS_META[d];
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${m.cls}`}>
@@ -124,6 +151,7 @@ function StatusBadge({ raw }: { raw: RawStatus }) {
 const DISPLAY_FILTERS: { label: string; value: "all" | DisplayStatus }[] = [
   { label: "All",         value: "all"         },
   { label: "Active",      value: "active"      },
+  { label: "Trial",       value: "trial"       },
   { label: "Deactivated", value: "deactivated" },
 ];
 
@@ -221,9 +249,12 @@ export default function OwnerPage() {
   useEffect(() => { setPage(1); }, [searchDeb, filterDisp]);
 
   const listVars = useMemo(() => {
-    const input: Record<string, unknown> = { page, limit };
+    const input: Record<string, unknown> = {
+      page,
+      limit,
+      lifecycle: toLifecycleEnum(filterDisp),
+    };
     if (searchDeb) input.search = searchDeb;
-    if (filterDisp !== "all") input.status = toFilterValue(filterDisp);
     return { input };
   }, [page, searchDeb, filterDisp]);
 
@@ -233,25 +264,15 @@ export default function OwnerPage() {
     fetchPolicy: "network-only",
   });
 
-  const totalsAll = useQuery<PlatformBusinessesQueryData>(PLATFORM_BUSINESSES_QUERY, {
-    skip: !canAccess,
-    variables: { input: { page: 1, limit: 1 } },
-    fetchPolicy: "network-only",
-  });
-  const totalsActive = useQuery<PlatformBusinessesQueryData>(PLATFORM_BUSINESSES_QUERY, {
-    skip: !canAccess,
-    variables: { input: { page: 1, limit: 1, status: "active" } },
-    fetchPolicy: "network-only",
-  });
-  const totalsDeactivated = useQuery<PlatformBusinessesQueryData>(PLATFORM_BUSINESSES_QUERY, {
-    skip: !canAccess,
-    variables: { input: { page: 1, limit: 1, status: "deactivated" } },
-    fetchPolicy: "network-only",
-  });
+  const { data: statsData, refetch: refetchStats } = useQuery<PlatformDashboardStatsQueryData>(
+    PLATFORM_DASHBOARD_STATS_QUERY,
+    { skip: !canAccess, fetchPolicy: "network-only" },
+  );
   const totals = {
-    all: totalsAll.data?.platformBusinesses?.total ?? 0,
-    active: totalsActive.data?.platformBusinesses?.total ?? 0,
-    deactivated: totalsDeactivated.data?.platformBusinesses?.total ?? 0,
+    all: statsData?.platformDashboardStats?.totalBusinesses ?? 0,
+    active: statsData?.platformDashboardStats?.activeBusinesses ?? 0,
+    trial: statsData?.platformDashboardStats?.trialBusinesses ?? 0,
+    deactivated: statsData?.platformDashboardStats?.deactivatedBusinesses ?? 0,
   };
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -261,20 +282,25 @@ export default function OwnerPage() {
     fetchPolicy: "network-only",
   });
 
+  const mutRefetch = [
+    { query: PLATFORM_BUSINESSES_QUERY, variables: listVars },
+    { query: PLATFORM_DASHBOARD_STATS_QUERY },
+  ] as const;
+
   const [activateBusiness,   { loading: activating   }] = useMutation(ACTIVATE_BUSINESS_MUTATION, {
-    refetchQueries: [{ query: PLATFORM_BUSINESSES_QUERY, variables: listVars }],
+    refetchQueries: [...mutRefetch],
     awaitRefetchQueries: true,
   });
   const [deactivateBusiness, { loading: deactivating }] = useMutation(DEACTIVATE_BUSINESS_MUTATION, {
-    refetchQueries: [{ query: PLATFORM_BUSINESSES_QUERY, variables: listVars }],
+    refetchQueries: [...mutRefetch],
     awaitRefetchQueries: true,
   });
   const [deleteBusiness, { loading: deleting }] = useMutation(DELETE_BUSINESS_MUTATION, {
-    refetchQueries: [{ query: PLATFORM_BUSINESSES_QUERY, variables: listVars }],
+    refetchQueries: [...mutRefetch],
     awaitRefetchQueries: true,
   });
   const [extendTrial,        { loading: extending    }] = useMutation(EXTEND_TRIAL_MUTATION, {
-    refetchQueries: [{ query: PLATFORM_BUSINESSES_QUERY, variables: listVars }],
+    refetchQueries: [...mutRefetch],
     awaitRefetchQueries: true,
   });
 
@@ -286,9 +312,7 @@ export default function OwnerPage() {
     await Promise.all([
       refetch(),
       refetchWs(),
-      totalsAll.refetch(),
-      totalsActive.refetch(),
-      totalsDeactivated.refetch(),
+      refetchStats(),
       selectedId != null ? detail.refetch() : Promise.resolve(),
     ]);
   };
@@ -313,6 +337,7 @@ export default function OwnerPage() {
   const STAT_CARDS: { label: string; value: number; disp: "all" | DisplayStatus }[] = [
     { label: "Total",       value: totals.all,         disp: "all"         },
     { label: "Active",      value: totals.active,      disp: "active"      },
+    { label: "Trial",       value: totals.trial,       disp: "trial"       },
     { label: "Deactivated", value: totals.deactivated, disp: "deactivated" },
   ];
 
@@ -380,7 +405,7 @@ export default function OwnerPage() {
           </div>
           <select
             value={filterDisp}
-            onChange={(e) => setFilterDisp(e.target.value as any)}
+            onChange={(e) => setFilterDisp(e.target.value as "all" | DisplayStatus)}
             className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 outline-none"
           >
             {DISPLAY_FILTERS.map((f) => (
@@ -427,7 +452,7 @@ export default function OwnerPage() {
                     <div className="truncate text-sm font-semibold text-slate-900">{b.name}</div>
                     <div className="mt-0.5 text-xs text-slate-500">{b.businessType || "—"}</div>
                   </div>
-                  <StatusBadge raw={b.status} />
+                  <StatusBadge raw={b.status} trialEndsAt={b.trialEndsAt} />
                 </div>
 
                 <div className="mt-2 flex items-center gap-3 text-xs text-slate-500">
@@ -564,7 +589,7 @@ export default function OwnerPage() {
                           <div className="truncate text-base font-semibold text-slate-900">{d.name}</div>
                           <div className="mt-0.5 text-xs text-slate-500">{d.businessType || "—"}</div>
                         </div>
-                        <StatusBadge raw={d.status} />
+                        <StatusBadge raw={d.status} trialEndsAt={d.trialEndsAt} />
                       </div>
                       {d.trialEndsAt ? (
                         <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-500">
