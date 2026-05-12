@@ -4,6 +4,7 @@ import { BottomNav } from "@/components/common/bottom-nav";
 import { Avatar } from "@/components/common/avatar";
 import { RequireAuth } from "@/components/common/require-auth";
 import { HomeDashboardSkeleton } from "@/components/home/home-dashboard-skeleton";
+import { BusinessTrialInactiveScreen } from "@/components/home/business-trial-inactive-screen";
 import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
 import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
@@ -15,6 +16,7 @@ import { useAppMode } from "@/lib/app-mode";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
+import { openStamplySupportTelegram } from "@/lib/support-telegram";
 import { gql } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
@@ -128,6 +130,20 @@ type MyWorkspacesQueryData = {
 function isWorkspaceDeactivated(status?: string | null) {
   const s = String(status || "").toLowerCase();
   return s === "blocked" || s === "deactivated";
+}
+
+function isBusinessInactiveDashboardError(err: unknown): boolean {
+  const e = err as { graphQLErrors?: readonly { message?: string; extensions?: unknown }[] };
+  const list = e?.graphQLErrors ?? [];
+  if (!list.length) return false;
+  return list.some((x) => {
+    const m = String(x.message ?? "").toUpperCase();
+    if (m.includes("BUSINESS_INACTIVE")) return true;
+    if (m.includes("TRIAL_EXPIRED")) return true;
+    if (m.includes("BUSINESS_BLOCKED")) return true;
+    const ext = JSON.stringify(x.extensions ?? {});
+    return ext.includes("BUSINESS_INACTIVE") || ext.includes("TRIAL_EXPIRED") || ext.includes("BUSINESS_BLOCKED");
+  });
 }
 
 const APPROVE_VISIT_MUTATION = gql`
@@ -348,6 +364,10 @@ function OwnerHome() {
   const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
 
   const workspaces = workspacesData?.myWorkspaces?.items ?? [];
+  const workspaceRowForActiveBusiness = useMemo(() => {
+    if (activeBusinessId == null) return undefined;
+    return workspaces.find((w) => w.business_id === activeBusinessId);
+  }, [workspaces, activeBusinessId]);
   const hasPlatformDashboard = Boolean(workspacesData?.myWorkspaces?.hasPlatformDashboard);
   const canCreateBusiness = Boolean(workspacesData?.myWorkspaces?.canCreateBusiness);
 
@@ -504,7 +524,17 @@ function OwnerHome() {
   }, [client, customersData?.myCustomers, shouldSkipBusiness]);
 
   const workspacesHydrated = clientReady && ready && !!token && !workspacesLoading;
+  const showBusinessInactiveScreen =
+    clientReady &&
+    ready &&
+    !!token &&
+    (isBusinessInactiveDashboardError(error) ||
+      (!workspacesLoading &&
+        activeBusinessId != null &&
+        workspaceRowForActiveBusiness != null &&
+        isWorkspaceDeactivated(workspaceRowForActiveBusiness.status)));
   const showDashboardSkeleton =
+    !showBusinessInactiveScreen &&
     !error &&
     clientReady &&
     ready &&
@@ -514,11 +544,16 @@ function OwnerHome() {
   const noActiveWorkspace = workspacesHydrated && shouldSkipBusiness;
 
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
-  if (error) {
+  if (error && !isBusinessInactiveDashboardError(error)) {
     return (
-      <div className="p-4 text-sm text-gray-500">
-        {txt.homeFailedDashboard}
-        {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-28">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 text-sm text-gray-500 shadow-sm">
+            {txt.homeFailedDashboard}
+            {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
+          </div>
+        </div>
+        <BottomNav currentKey="home" />
       </div>
     );
   }
@@ -605,7 +640,25 @@ function OwnerHome() {
 
   return (
     <div className="min-h-dvh bg-[#f7f7f8] text-black">
-      {showDashboardSkeleton ? (
+      {showBusinessInactiveScreen ? (
+        <>
+          <header className="sticky top-0 z-20 border-b border-gray-200 bg-[#f7f7f8]/80 backdrop-blur">
+            <div className="mx-auto flex max-w-md items-center justify-between px-4 py-3">
+              <button
+                type="button"
+                ref={workspaceBtnRef}
+                onClick={() => setWorkspaceOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#0F172A] shadow-sm active:scale-[0.99]"
+              >
+                <Shield className="h-4 w-4 text-gray-600" />
+                {txt.homeWorkspacesNav}
+              </button>
+              {langSwitcher}
+            </div>
+          </header>
+          <BusinessTrialInactiveScreen txt={txt} onCta={openStamplySupportTelegram} />
+        </>
+      ) : showDashboardSkeleton ? (
         <HomeDashboardSkeleton />
       ) : noActiveWorkspace ? (
         <>
@@ -898,7 +951,7 @@ function OwnerHome() {
 
       <BottomNav currentKey="home" />
 
-      {!showDashboardSkeleton && !noActiveWorkspace && pendingModal.show ? (
+      {!showDashboardSkeleton && !noActiveWorkspace && !showBusinessInactiveScreen && pendingModal.show ? (
         <div
           className={pendingModal.overlayClassName}
           onTransitionEnd={pendingModal.onOverlayTransitionEnd}
@@ -972,7 +1025,7 @@ function OwnerHome() {
         </div>
       ) : null}
 
-      {!showDashboardSkeleton && !noActiveWorkspace && activityModal.show ? (
+      {!showDashboardSkeleton && !noActiveWorkspace && !showBusinessInactiveScreen && activityModal.show ? (
         <div
           className={activityModal.overlayClassName}
           onTransitionEnd={activityModal.onOverlayTransitionEnd}

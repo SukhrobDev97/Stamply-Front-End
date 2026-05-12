@@ -3,21 +3,12 @@
 import { ApolloClient, HttpLink, InMemoryCache } from "@apollo/client";
 import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
+import { shouldInvalidateStamplySession } from "@/lib/auth-session-guard";
 
 const httpLink = new HttpLink({
   uri: process.env.NEXT_PUBLIC_GRAPHQL_URL,
   credentials: "omit",
 });
-
-function shouldInvalidateSession(message: string | undefined | null) {
-  const m = String(message ?? "");
-  return (
-    m.includes("Unauthorized") ||
-    m.includes("Session outdated") ||
-    m.includes("Missing business_id") ||
-    m.includes("Business not found for current user")
-  );
-}
 
 function invalidateSession() {
   try {
@@ -69,7 +60,7 @@ const errorLink = onError((opts: any) => {
     (networkError as any)?.status ??
     (networkError as any)?.response?.status;
 
-  const hit = messages.some((m) => shouldInvalidateSession(m)) || status === 401;
+  const hit = shouldInvalidateStamplySession(messages, status);
   if (!hit) return;
 
   invalidateSession();

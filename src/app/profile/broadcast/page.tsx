@@ -129,7 +129,6 @@ export default function BroadcastPage() {
   const role = typeof roleRaw === "string" ? roleRaw.toLowerCase() : "";
   const canAccess = role === "owner" || role === "staff";
 
-  const [broadcastType, setBroadcastType] = useState<BroadcastType>("ANNOUNCEMENT");
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const imagesRef = useRef<string[]>([]);
@@ -298,7 +297,7 @@ export default function BroadcastPage() {
         return;
       }
       const input: { type: BroadcastType; message: string; images?: string[] } = {
-        type: broadcastType,
+        type: "ANNOUNCEMENT",
         message: body,
       };
       if (images.length > 0) input.images = images;
@@ -390,21 +389,6 @@ export default function BroadcastPage() {
               ) : null}
 
               <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-sm space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    {txt.broadcastTypeLabel}
-                  </label>
-                  <select
-                    value={broadcastType}
-                    disabled={formLocked}
-                    onChange={(e) => setBroadcastType(e.target.value as BroadcastType)}
-                    className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-60"
-                  >
-                    <option value="ANNOUNCEMENT">{txt.broadcastTypeAnnouncement}</option>
-                    <option value="DISCOUNT">{txt.broadcastTypeDiscount}</option>
-                  </select>
-                </div>
-
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">

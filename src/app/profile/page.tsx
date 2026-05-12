@@ -17,6 +17,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
+import { openStamplySupportTelegram } from "@/lib/support-telegram";
 import { t, type ProfileLang } from "./copy";
 
 type ProfileData = {
@@ -175,13 +176,7 @@ export default function ProfilePage() {
   );
 
   const onSupport = () => {
-    const url = "https://t.me/sukhr0b97";
-    const tg = (window as any)?.Telegram?.WebApp;
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(url);
-      return;
-    }
-    window.open(url, "_blank");
+    openStamplySupportTelegram();
   };
 
   const onInviteStaff = async () => {

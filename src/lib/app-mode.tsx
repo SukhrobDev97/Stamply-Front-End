@@ -22,10 +22,15 @@ const AppModeContext = createContext<AppModeCtx | null>(null);
 const STORAGE_KEY = "stamply_mode";
 
 function readStoredMode(initialRole: string | null): AppMode {
-  if (typeof window === "undefined") return "platform";
+  if (typeof window === "undefined") {
+    return initialRole === "platform_owner" ? "platform" : "business";
+  }
   try {
     const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (stored === "business" || stored === "platform") return stored;
+    if (stored === "business" || stored === "platform") {
+      if (stored === "platform" && initialRole !== "platform_owner") return "business";
+      return stored;
+    }
   } catch {
     // ignore
   }
@@ -42,6 +47,18 @@ export function AppModeProvider({
   const [mode, setMode] = useState<AppMode>(() =>
     readStoredMode(initialRole),
   );
+
+  useEffect(() => {
+    if (initialRole === null) return;
+    if (initialRole !== "platform_owner") {
+      try {
+        sessionStorage.setItem(STORAGE_KEY, "business");
+      } catch {
+        // ignore
+      }
+      setMode((m) => (m === "platform" ? "business" : m));
+    }
+  }, [initialRole]);
 
   useEffect(() => {
     const onInvalid = () => {
