@@ -5,14 +5,13 @@ import { Avatar } from "@/components/common/avatar";
 import { RequireAuth } from "@/components/common/require-auth";
 import { HomeDashboardSkeleton } from "@/components/home/home-dashboard-skeleton";
 import { BusinessTrialInactiveScreen } from "@/components/home/business-trial-inactive-screen";
-import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
-import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { useAuth } from "@/app/providers";
 import { useAppMode } from "@/lib/app-mode";
+import { switchToBusinessWorkspace, switchToPlatformWorkspace } from "@/lib/workspace-switch";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
@@ -29,19 +28,31 @@ import {
   Clock,
   Loader2,
   Minus,
-  Plus,
   Shield,
   TrendingUp,
   Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 type PendingVisit = {
   id: number;
   customerId: number;
+  customerName?: string | null;
   visitTime: string;
 };
+
+function subscribeHydration() {
+  return () => undefined;
+}
+
+function getClientHydrationSnapshot() {
+  return true;
+}
+
+function getServerHydrationSnapshot() {
+  return false;
+}
 
 type RecentActivityItem = {
   id: number;
@@ -51,35 +62,6 @@ type RecentActivityItem = {
   createdAt: string;
 };
 
-type RecentRewardRow = {
-  id: number;
-  customerId: number;
-  issuedAt?: string | null;
-};
-
-type RewardRow = {
-  id: number;
-  customerId: number;
-  status: string;
-  issuedAt?: string | null;
-  redeemedAt?: string | null;
-};
-
-type CustomerDetailQueryResult = {
-  customerDetail: {
-    id: number;
-    rewards: { id: number; status: string; issuedAt?: string | null; redeemedAt?: string | null }[];
-  };
-};
-
-function isUnlockedReward(status: string) {
-  return status.toLowerCase() === "available";
-}
-
-function isRedeemedReward(status: string) {
-  return status.toLowerCase() === "redeemed";
-}
-
 type OwnerDashboardStatsData = {
   visitsToday: number;
   todayVisits?: number;
@@ -87,8 +69,6 @@ type OwnerDashboardStatsData = {
   percentChange?: number | null;
   trendDirection?: string | null;
   totalCustomers: number;
-  rewardsIssued?: number;
-  recentRewards?: RecentRewardRow[];
   pendingCount: number;
   pendingVisits: PendingVisit[];
   recentActivity: RecentActivityItem[];
@@ -103,10 +83,6 @@ type ProfileQueryData = {
     avatar_url?: string | null;
     business?: { id: number; name?: string | null; phone?: string | null; address?: string | null; businessType?: string | null } | null;
   } | null;
-};
-
-type MyCustomersQueryData = {
-  myCustomers: { id: number; name?: string | null; stampCount: number }[];
 };
 
 type MyWorkspacesItem = {
@@ -170,12 +146,6 @@ function getFirstLetter(value: string) {
   return safe ? safe[0]!.toUpperCase() : "";
 }
 
-function parseCustomerIdFromActivityTitle(title: string) {
-  const m = title.match(/Customer\s*#\s*(\d+)/i);
-  const id = m?.[1] ? Number(m[1]) : Number.NaN;
-  return Number.isFinite(id) ? id : null;
-}
-
 function stripCustomerPrefix(title: string) {
   return title
     .replace(/Customer\s*#\s*\d+\s*/i, "")
@@ -223,10 +193,11 @@ function OwnerHome() {
   const client = useApolloClient();
   const { ready, role } = useAuth();
   const { mode, switchToBusiness, switchToPlatform } = useAppMode();
-  const [clientReady, setClientReady] = useState(false);
-  useEffect(() => {
-    setClientReady(true);
-  }, []);
+  const clientReady = useSyncExternalStore(
+    subscribeHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
   const token = useMemo(() => {
     if (!clientReady || typeof window === "undefined") return null;
     try {
@@ -236,10 +207,10 @@ function OwnerHome() {
     }
   }, [clientReady]);
   const isPlatformOwner = role === "platform_owner";
-  const [pollMs, setPollMs] = useState(5000);
+  const [pollMs, setPollMs] = useState(30000);
 
   useEffect(() => {
-    const onVis = () => setPollMs(document.visibilityState === "visible" ? 5000 : 0);
+    const onVis = () => setPollMs(document.visibilityState === "visible" ? 30000 : 0);
     onVis();
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
@@ -274,7 +245,9 @@ function OwnerHome() {
 
   const txt = t[lang];
   const txtRef = useRef(txt);
-  txtRef.current = txt;
+  useEffect(() => {
+    txtRef.current = txt;
+  }, [txt]);
 
   useEffect(() => {
     if (!ready) return;
@@ -286,8 +259,9 @@ function OwnerHome() {
   }, [clientReady, isPlatformOwner, mode, ready, router, token]);
 
   const { data: profileData } = useQuery<ProfileQueryData>(PROFILE_QUERY, {
-    skip: !ready || !token || isPlatformOwner,
-    fetchPolicy: "network-only",
+    skip: !ready || !token || (isPlatformOwner && mode !== "business"),
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
   });
 
   const { data: workspacesData, loading: workspacesLoading, refetch: refetchWorkspaces } = useQuery<MyWorkspacesQueryData>(
@@ -304,21 +278,13 @@ function OwnerHome() {
 
   const shouldSkipBusiness = !activeBusinessId;
 
-  const { data, error } = useQuery<OwnerDashboardQueryData>(
+  const { data, error, loading: dashboardLoading } = useQuery<OwnerDashboardQueryData>(
     OWNER_DASHBOARD,
     {
     // Business dashboard: only when active workspace is selected.
     skip: !ready || !token || shouldSkipBusiness,
-    fetchPolicy: "network-only",
-    pollInterval: pollMs,
-    notifyOnNetworkStatusChange: true,
-  });
-
-  const { data: customersData } = useQuery<MyCustomersQueryData>(
-    MY_CUSTOMERS_QUERY,
-    {
-    skip: shouldSkipBusiness,
-    fetchPolicy: "network-only",
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
     pollInterval: pollMs,
     notifyOnNetworkStatusChange: true,
   });
@@ -340,7 +306,7 @@ function OwnerHome() {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [successId, setSuccessId] = useState<number | null>(null);
 
-    const stats = data?.ownerDashboardStats;
+  const stats = data?.ownerDashboardStats;
   const visitDir = visitTrendDir(stats);
   const pendingVisits = (stats?.pendingVisits ?? []).filter((v) => !approvedIds.includes(v.id));
   // Prefer list length so the card matches what the modal shows.
@@ -350,26 +316,22 @@ function OwnerHome() {
     stats?.pendingCount != null
       ? Math.max(pendingCountFromList, Math.max(0, stats.pendingCount - approvedIds.length))
       : pendingCountFromList;
-  const activeWsItem = (workspacesData?.myWorkspaces?.items ?? []).find(
+  const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
+
+  const workspaces = useMemo(() => workspacesData?.myWorkspaces?.items ?? [], [workspacesData?.myWorkspaces?.items]);
+  const activeWsItem = workspaces.find(
     (w) => w.business_id === activeBusinessId || w.is_active_workspace,
   );
   const businessName = profileData?.profile?.business?.name ?? activeWsItem?.name ?? "";
-  const businessPhone = profileData?.profile?.business?.phone ?? "";
-  const businessAddress = profileData?.profile?.business?.address ?? "";
   const businessType = profileData?.profile?.business?.businessType ?? activeWsItem?.business_type ?? "";
   const userAvatarUrlRaw = profileData?.profile?.avatar_url ?? null;
   const userAvatarUrl =
     typeof userAvatarUrlRaw === "string" && userAvatarUrlRaw.trim() ? userAvatarUrlRaw.trim() : null;
-
-  const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
-
-  const workspaces = workspacesData?.myWorkspaces?.items ?? [];
   const workspaceRowForActiveBusiness = useMemo(() => {
     if (activeBusinessId == null) return undefined;
     return workspaces.find((w) => w.business_id === activeBusinessId);
   }, [workspaces, activeBusinessId]);
   const hasPlatformDashboard = Boolean(workspacesData?.myWorkspaces?.hasPlatformDashboard);
-  const canCreateBusiness = Boolean(workspacesData?.myWorkspaces?.canCreateBusiness);
 
   const workspaceBtnRef = useRef<HTMLButtonElement | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -412,19 +374,16 @@ function OwnerHome() {
     }
     setSwitchingTo(businessId);
     try {
-      await selectWorkspace({ variables: { businessId } });
-      // Set mode to "business" before navigation so the redirect effect skips /owner.
-      switchToBusiness(businessId);
-      if (!isPlatformOwner) {
-        try { await client.query({ query: PROFILE_QUERY, fetchPolicy: "network-only" }); } catch { /* ignore */ }
-      }
-      await refetchWorkspaces();
-      await Promise.all([
-        client.query({ query: OWNER_DASHBOARD, fetchPolicy: "network-only" }).catch(() => null),
-        client.query({ query: MY_CUSTOMERS_QUERY, fetchPolicy: "network-only" }).catch(() => null),
-      ]);
+      await switchToBusinessWorkspace({
+        businessId,
+        selectWorkspace,
+        switchToBusiness,
+        router,
+        client,
+        refetchWorkspaces,
+        refreshDashboard: true,
+      });
       setWorkspaceOpen(false);
-      router.replace("/");
     } finally {
       setSwitchingTo(null);
     }
@@ -436,93 +395,6 @@ function OwnerHome() {
   }, [toast]);
 
   const recentActivity = stats?.recentActivity ?? [];
-  const customerNameById = new Map<number, string>(
-    (customersData?.myCustomers ?? []).map((c) => [
-      Number(c.id),
-      typeof c.name === "string" && c.name.trim() ? c.name : "",
-    ]),
-  );
-  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "";
-
-  const [rewardRows, setRewardRows] = useState<RewardRow[]>([]);
-  const [rewardsLoading, setRewardsLoading] = useState(false);
-
-  const todayRewardRows = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startMs = start.getTime();
-    return rewardRows.filter((r) => {
-      const iso = r.issuedAt ?? r.redeemedAt ?? null;
-      if (!iso) return false;
-      const t = new Date(iso).getTime();
-      return Number.isFinite(t) && t >= startMs;
-    });
-  }, [rewardRows]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (shouldSkipBusiness) return;
-      const ids = (customersData?.myCustomers ?? [])
-        .map((c) => Number(c.id))
-        .filter((id) => Number.isFinite(id));
-
-      if (ids.length === 0) {
-        setRewardRows([]);
-        return;
-      }
-
-      setRewardsLoading(true);
-      try {
-        const results = await Promise.all(
-          ids.map((customerId) =>
-            client.query<CustomerDetailQueryResult>({
-              query: CUSTOMER_DETAIL_QUERY,
-              variables: { customerId },
-              fetchPolicy: "network-only",
-            }),
-          ),
-        );
-
-        if (cancelled) return;
-
-        const next: RewardRow[] = [];
-        for (const r of results) {
-          const detail = r.data?.customerDetail;
-          if (!detail) continue;
-          for (const rw of detail.rewards ?? []) {
-            next.push({
-              id: Number(rw.id),
-              customerId: Number(detail.id),
-              status: String(rw.status ?? ""),
-              issuedAt: rw.issuedAt ?? null,
-              redeemedAt: rw.redeemedAt ?? null,
-            });
-          }
-        }
-
-        next.sort((a, b) => {
-          const ta = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
-          const tb = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
-          return tb - ta;
-        });
-
-        setRewardRows(next);
-      } catch {
-        if (cancelled) return;
-        setRewardRows([]);
-      } finally {
-        if (!cancelled) setRewardsLoading(false);
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, customersData?.myCustomers, shouldSkipBusiness]);
-
   const workspacesHydrated = clientReady && ready && !!token && !workspacesLoading;
   const showBusinessInactiveScreen =
     clientReady &&
@@ -539,12 +411,12 @@ function OwnerHome() {
     clientReady &&
     ready &&
     !!token &&
-    (workspacesLoading || (!shouldSkipBusiness && (!data || customersData == null)));
+    (workspacesLoading || (!shouldSkipBusiness && !data));
 
   const noActiveWorkspace = workspacesHydrated && shouldSkipBusiness;
 
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
-  if (error && !isBusinessInactiveDashboardError(error)) {
+  if (error && !data && !isBusinessInactiveDashboardError(error)) {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pt-10 pb-28">
@@ -558,12 +430,10 @@ function OwnerHome() {
     );
   }
   const formatActivityPartsFromTitle = (title: string) => {
-    const customerId = parseCustomerIdFromActivityTitle(title);
-    const name = customerId != null ? nameForCustomerId(customerId) : "";
     const rawAction = stripCustomerPrefix(title);
     const base = rawAction || title;
     const action = translateActivityDescription(base, txt);
-    return { name, action };
+    return { name: "", action };
   };
 
   const formatActivityParts = (item: RecentActivityItem) => {
@@ -586,7 +456,7 @@ function OwnerHome() {
     try {
       const res = await approveVisit({
         variables: { visitId: Number(visitId) },
-        refetchQueries: [{ query: OWNER_DASHBOARD }, { query: MY_CUSTOMERS_QUERY }],
+        refetchQueries: [{ query: OWNER_DASHBOARD }],
       });
       if (res.data?.approveVisit?.success !== true) {
         setLoadingId(null);
@@ -721,7 +591,12 @@ function OwnerHome() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">{langSwitcher}</div>
+          <div className="flex items-center gap-2">
+            {dashboardLoading && data ? (
+              <Loader2 className="h-4 w-4 animate-spin text-gray-400" aria-label={txt.homeLoadingAria} />
+            ) : null}
+            {langSwitcher}
+          </div>
         </div>
       </header>
 
@@ -737,27 +612,42 @@ function OwnerHome() {
               "shadow-[0_10px_26px_rgba(17,24,39,0.06)]",
             ].join(" ")}
           >
-            {pendingCount > 0 ? (
-              <motion.span
-                aria-hidden="true"
-                className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[#F59E0B]/18 blur-2xl"
-                animate={{ scale: [1, 1.1, 1], opacity: [0.6, 1, 0.6] }}
-                transition={{ duration: 2.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-              />
-            ) : null}
-
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold tracking-[-0.01em] text-gray-900">
+                <div className="text-[14px] font-semibold tracking-[-0.01em] text-gray-900">
                   {txt.homePending}
                 </div>
-                <div className="mt-1 text-[11px] font-medium text-gray-400">
+                <div className="mt-1 text-[12px] font-medium text-gray-400">
                   {txt.homePendingSubtitle}
                 </div>
               </div>
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#F59E0B]/12 text-[#B45309]">
-                <Clock size={18} strokeWidth={2.4} />
-              </span>
+              {pendingCount > 0 ? (
+                <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#F59E0B]/24 text-[#92400E]">
+                  <motion.span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 rounded-2xl bg-[#F59E0B]/40"
+                    animate={{ scale: [1, 1.16, 1], opacity: [0.68, 0.22, 0.68] }}
+                    transition={{ duration: 2.35, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+                  />
+                  <motion.span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -inset-1 rounded-[20px] border-2 border-[#F59E0B]/60 shadow-[0_0_14px_rgba(245,158,11,0.34)]"
+                    animate={{ scale: [0.96, 1.18, 0.96], opacity: [0, 0.68, 0] }}
+                    transition={{ duration: 2.35, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+                  />
+                  <motion.span
+                    className="relative z-10 flex items-center justify-center"
+                    animate={{ scale: [1, 1.12, 1], opacity: [0.9, 1, 0.9] }}
+                    transition={{ duration: 2.35, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+                  >
+                    <Clock size={18} strokeWidth={2.4} />
+                  </motion.span>
+                </span>
+              ) : (
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#F59E0B]/12 text-[#B45309]">
+                  <Clock size={18} strokeWidth={2.4} />
+                </span>
+              )}
             </div>
 
             <div className="mt-3 text-[40px] font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[#D97706]">
@@ -775,10 +665,10 @@ function OwnerHome() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold tracking-[-0.01em] text-gray-900">
+                <div className="text-[14px] font-semibold tracking-[-0.01em] text-gray-900">
                   {txt.homeCustomers}
                 </div>
-                <div className="mt-1 text-[11px] font-medium text-gray-400">
+                <div className="mt-1 text-[12px] font-medium text-gray-400">
                   {txt.homeCustomersSubtitle}
                 </div>
               </div>
@@ -810,13 +700,13 @@ function OwnerHome() {
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/22 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.34)] backdrop-blur-md">
               <TrendingUp size={20} strokeWidth={2.45} />
             </span>
-            <span className="mt-4 text-[13px] font-semibold tracking-wide text-white/80">
+            <span className="mt-4 text-[14px] font-semibold tracking-wide text-white/80">
               {txt.homeVisitsToday}
             </span>
             <span className="mt-1 text-[58px] font-extrabold leading-none tracking-[-0.055em] text-white tabular-nums">
               {Number(stats?.todayVisits ?? stats?.visitsToday ?? 0)}
             </span>
-            <span className="mt-3 inline-flex w-fit items-center gap-2 rounded-full bg-white/18 px-3 py-1.5 text-[11px] font-semibold text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-md">
+            <span className="mt-3 inline-flex w-fit items-center gap-2 rounded-full bg-white/18 px-3 py-1.5 text-[12px] font-semibold text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-md">
               <span className="flex shrink-0 items-center text-white">
                 {visitDir === "down" ? (
                   <ArrowDown className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
@@ -826,7 +716,7 @@ function OwnerHome() {
                   <Minus className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
                 )}
               </span>
-              <span className="text-[12px] font-extrabold tabular-nums text-white">
+              <span className="text-[13px] font-extrabold tabular-nums text-white">
                 {formatVisitDeltaPercent(stats?.percentChange)}
               </span>
               <span className="h-1 w-1 shrink-0 rounded-full bg-white/55" />
@@ -884,7 +774,7 @@ function OwnerHome() {
             <span className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#CBB8FF]/35 blur-3xl" />
 
             <div className="relative z-10 mb-2.5 flex items-center justify-between gap-2">
-              <h2 className="min-w-0 truncate text-[13px] font-bold tracking-[-0.02em] text-gray-950">
+              <h2 className="min-w-0 truncate text-[14px] font-bold tracking-[-0.02em] text-gray-950">
                 {txt.homeRecentActivity}
               </h2>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEE6FF]/85 text-[#7665D8]">
@@ -895,7 +785,7 @@ function OwnerHome() {
             <div className="relative z-10">
               <div className="space-y-1.5">
                 {recentActivity.length === 0 ? (
-                  <div className="rounded-2xl bg-white/60 px-3 py-2 text-xs font-medium text-gray-500">
+                  <div className="rounded-2xl bg-white/60 px-3 py-2 text-sm font-medium text-gray-500">
                     {txt.homeNoActivity}
                   </div>
                 ) : (
@@ -915,20 +805,20 @@ function OwnerHome() {
                         <div className="min-w-0 flex-1">
                           {parts.name ? (
                             <>
-                              <p className="truncate text-[12px] font-semibold leading-tight text-gray-900">
+                              <p className="truncate text-[13px] font-semibold leading-tight text-gray-900">
                                 {parts.name}
                               </p>
-                              <p className="truncate text-[10.5px] font-medium leading-tight text-gray-400">
+                              <p className="truncate text-[11.5px] font-medium leading-tight text-gray-400">
                                 {parts.action}
                               </p>
                             </>
                           ) : (
-                            <p className="truncate text-[12px] font-semibold leading-tight text-gray-900">
+                            <p className="truncate text-[13px] font-semibold leading-tight text-gray-900">
                               {parts.action}
                             </p>
                           )}
                         </div>
-                        <span className="flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[#EDE8F7]/95 px-2 py-0.5 text-[8.5px] font-semibold tabular-nums text-gray-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                        <span className="flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[#EDE8F7]/95 px-2 py-0.5 text-[9.5px] font-semibold tabular-nums text-gray-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
                           {item?.createdAt ? formatTime(item.createdAt) : ""}
                         </span>
                       </div>
@@ -988,7 +878,7 @@ function OwnerHome() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-base font-semibold text-gray-900">
-                          {nameForCustomerId(v.customerId) || txt.userFallback}
+                          {v.customerName || txt.userFallback}
                         </div>
                         <div className="mt-1 text-xs text-gray-500">
                           {v.visitTime ? formatTime(v.visitTime) : ""}
@@ -1002,7 +892,7 @@ function OwnerHome() {
                           "shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition-colors duration-200",
                           successId === v.id
                             ? "bg-emerald-600 text-white"
-                            : "bg-black text-white disabled:opacity-70",
+                            : "bg-[#0284C7] text-white disabled:opacity-70",
                         ].join(" ")}
                       >
                         {loadingId === v.id ? (
@@ -1135,9 +1025,8 @@ function OwnerHome() {
                     <button
                       type="button"
                       onClick={() => {
-                        switchToPlatform();
+                        switchToPlatformWorkspace({ switchToPlatform, router });
                         setWorkspaceOpen(false);
-                        router.replace("/owner");
                       }}
                       className="flex h-[56px] w-full items-center justify-between gap-3 rounded-2xl px-3 text-left transition hover:bg-gray-50 active:scale-[0.99]"
                     >

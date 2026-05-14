@@ -10,7 +10,7 @@ import type { ProfileLang } from "@/app/profile/copy";
 import { t } from "@/app/profile/copy";
 import { useAppLang } from "@/lib/use-app-lang";
 import { useMutation, useQuery } from "@apollo/client/react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -237,18 +237,21 @@ export default function CustomerDetailPage() {
 
         <header className="mt-6">
           <h2 className="text-2xl font-semibold tracking-tight text-gray-900">{detail.name}</h2>
-          <p className="mt-3 text-base text-gray-500">{detail.phone}</p>
         </header>
 
         <div className="mt-10 grid grid-cols-2 gap-4">
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{txt.visitsTitle}</div>
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-400">
+              <CalendarCheck className="h-3.5 w-3.5 text-[#0284C7]" aria-hidden />
+              {txt.visitsTitle}
+            </div>
             <div className="mt-2 text-3xl font-semibold tabular-nums text-gray-900">
               {detail.total_visits}
             </div>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-400">
+              <BadgeCheck className="h-3.5 w-3.5 text-[#0284C7]" aria-hidden />
               {txt.visitsMetaStamps}
             </div>
             <div className="mt-2 text-3xl font-semibold tabular-nums text-gray-900">
@@ -261,7 +264,7 @@ export default function CustomerDetailPage() {
           type="button"
           disabled={giving || redeeming}
           onClick={() => void handleGiveStamp()}
-          className="mt-10 w-full rounded-2xl bg-black py-4 text-base font-semibold text-white disabled:opacity-50"
+          className="mt-10 w-full rounded-2xl bg-[#0284C7] py-4 text-base font-semibold text-white disabled:opacity-50"
         >
           {txt.visitsGiveStamp}
         </button>

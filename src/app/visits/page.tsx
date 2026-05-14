@@ -207,7 +207,7 @@ export default function VisitsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-base font-semibold text-gray-900">{c.name}</div>
                       <div className="mt-1 text-sm text-gray-500">
-                        {c.phone} • {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
+                        {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
                         {txt.visitsMetaStamps}
                       </div>
                     </div>
@@ -215,7 +215,7 @@ export default function VisitsPage() {
                       type="button"
                       disabled={giving || redeeming}
                       onClick={() => onGiveStamp(c)}
-                      className="rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      className="rounded-xl bg-[#0284C7] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
                       {txt.visitsGiveStamp}
                     </button>

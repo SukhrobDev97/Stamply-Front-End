@@ -15,7 +15,7 @@ import { useMutation } from "@apollo/client/react";
 import { ArrowLeft, ChevronRight, DoorOpen, HelpCircle, Loader2, LogOut, Megaphone, UserPlus } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { openStamplySupportTelegram } from "@/lib/support-telegram";
 import { t, type ProfileLang } from "./copy";
@@ -106,6 +106,7 @@ export default function ProfilePage() {
   });
   const [leaveBusiness, { loading: leaveLoading }] = useMutation<{ leaveBusiness: boolean }>(LEAVE_BUSINESS_MUTATION);
   const qrModal = useOverlayModal();
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -158,13 +159,25 @@ export default function ProfilePage() {
   }, [biz?.id]);
 
   const onDownloadQr = useCallback(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>("#profile-qr canvas");
+    const canvas = qrCanvasRef.current ?? document.querySelector<HTMLCanvasElement>("#profile-qr canvas");
     if (!canvas) return;
-    const url = canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
-    a.href = url;
+    a.href = dataUrl;
     a.download = "stamply-qr.png";
-    a.click();
+    a.rel = "noopener";
+    a.style.position = "fixed";
+    a.style.left = "-9999px";
+    a.style.top = "0";
+    a.style.width = "1px";
+    a.style.height = "1px";
+    a.style.opacity = "0";
+    document.body.appendChild(a);
+    const clicked = a.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, view: window }),
+    );
+    window.setTimeout(() => a.remove(), 0);
+    if (!clicked) window.location.href = dataUrl;
   }, []);
 
   const { data: staffData, loading: staffLoading, error: staffError } = useQuery<GetBusinessStaffData>(
@@ -194,7 +207,7 @@ export default function ProfilePage() {
         shareText,
       )}`;
 
-      const tg = (window as any)?.Telegram?.WebApp;
+      const tg = window.Telegram?.WebApp;
       if (tg?.openTelegramLink) {
         tg.openTelegramLink(shareUrl);
         return;
@@ -463,12 +476,12 @@ export default function ProfilePage() {
                 id="profile-qr"
                 className="mt-4 flex justify-center rounded-xl border border-gray-100 bg-white p-4"
               >
-                <QRCodeCanvas value={qrValue} size={220} level="M" includeMargin />
+                <QRCodeCanvas ref={qrCanvasRef} value={qrValue} size={220} level="M" includeMargin />
               </div>
               <button
                 type="button"
                 onClick={onDownloadQr}
-                className="mt-4 w-full rounded-xl bg-black py-3 text-sm font-semibold text-white active:scale-[0.99]"
+                className="mt-4 w-full rounded-xl bg-[#0284C7] py-3 text-sm font-semibold text-white active:scale-[0.99]"
               >
                 {txt.homeDownload}
               </button>

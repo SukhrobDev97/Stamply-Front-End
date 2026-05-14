@@ -131,10 +131,18 @@ export default function BroadcastPage() {
 
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<string[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const imagesRef = useRef<string[]>([]);
+  const previewUrlsRef = useRef<string[]>([]);
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
+  useEffect(() => {
+    return () => {
+      for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
+      previewUrlsRef.current = [];
+    };
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [pollTargetId, setPollTargetId] = useState<number | null>(null);
@@ -160,7 +168,10 @@ export default function BroadcastPage() {
   });
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const historyRows = broadcastsData?.broadcasts ?? [];
+  const [deletedHistoryIds, setDeletedHistoryIds] = useState<number[]>([]);
+  const historyRows = (broadcastsData?.broadcasts ?? []).filter(
+    (row) => !deletedHistoryIds.includes(Number(row.id)),
+  );
 
   const inProgress =
     pollTargetId != null &&
@@ -208,15 +219,16 @@ export default function BroadcastPage() {
           setPollTargetId(null);
           setRemoteStatus(null);
           setMessage("");
+          for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
+          previewUrlsRef.current = [];
           setImages([]);
+          setImagePreviews([]);
           void client.refetchQueries({ include: [BROADCASTS_QUERY] });
-          void client.query({ query: BROADCASTS_QUERY, fetchPolicy: "network-only" }).catch(() => {});
         } else if (st === "FAILED") {
           setBanner(txt.broadcastFailed);
           setPollTargetId(null);
           setRemoteStatus(null);
           void client.refetchQueries({ include: [BROADCASTS_QUERY] });
-          void client.query({ query: BROADCASTS_QUERY, fetchPolicy: "network-only" }).catch(() => {});
         } else {
           setBanner(txt.broadcastSending);
         }
@@ -254,6 +266,7 @@ export default function BroadcastPage() {
 
     setImageUploading(true);
     const add: string[] = [];
+    const addPreviews: string[] = [];
     try {
       for (const f of picked.slice(0, room)) {
         if (!f.type.startsWith("image/")) continue;
@@ -261,10 +274,15 @@ export default function BroadcastPage() {
           setFormToast(txt.broadcastImageTooBig);
           continue;
         }
+        const previewUrl = URL.createObjectURL(f);
+        previewUrlsRef.current.push(previewUrl);
         try {
           const url = await uploadBroadcastImage(f);
           add.push(url);
+          addPreviews.push(previewUrl);
         } catch (err) {
+          URL.revokeObjectURL(previewUrl);
+          previewUrlsRef.current = previewUrlsRef.current.filter((u) => u !== previewUrl);
           if (err instanceof BroadcastImageUploadError) {
             if (err.code === "not_configured") setFormToast(txt.broadcastUploadNotConfigured);
             else if (err.code === "bad_url") setFormToast(txt.broadcastUploadBadUrl);
@@ -283,6 +301,7 @@ export default function BroadcastPage() {
 
     if (add.length === 0) return;
     setImages((prev) => [...prev, ...add].slice(0, MAX_IMAGES));
+    setImagePreviews((prev) => [...prev, ...addPreviews].slice(0, MAX_IMAGES));
   };
 
   const onSubmit = async () => {
@@ -339,7 +358,11 @@ export default function BroadcastPage() {
         refetchQueries: [{ query: BROADCASTS_QUERY }],
         awaitRefetchQueries: true,
       });
-      if (res.data?.deleteBroadcast !== true) setFormToast(txt.broadcastDeleteFailed);
+      if (res.data?.deleteBroadcast === true) {
+        setDeletedHistoryIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      } else {
+        setFormToast(txt.broadcastDeleteFailed);
+      }
     } catch {
       setFormToast(txt.broadcastDeleteFailed);
     } finally {
@@ -424,11 +447,21 @@ export default function BroadcastPage() {
                     {images.map((src, i) => (
                       <div key={`${i}-${src.slice(0, 64)}`} className="relative h-20 w-20 overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={src} alt="" className="h-full w-full object-cover" />
+                        <img src={imagePreviews[i] ?? src} alt="" className="h-full w-full object-cover" />
                         <button
                           type="button"
                           disabled={formLocked}
-                          onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                          onClick={() => {
+                            setImages((prev) => prev.filter((_, j) => j !== i));
+                            setImagePreviews((prev) => {
+                              const target = prev[i];
+                              if (target) {
+                                URL.revokeObjectURL(target);
+                                previewUrlsRef.current = previewUrlsRef.current.filter((u) => u !== target);
+                              }
+                              return prev.filter((_, j) => j !== i);
+                            });
+                          }}
                           className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white disabled:opacity-50"
                           aria-label={txt.broadcastRemoveImage}
                         >

@@ -13,6 +13,7 @@ declare global {
         initData: string;
         initDataUnsafe: Record<string, unknown>;
         platform?: string;
+        openTelegramLink?: (url: string) => void;
       };
     };
   }

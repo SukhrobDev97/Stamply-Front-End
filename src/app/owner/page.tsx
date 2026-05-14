@@ -1,8 +1,8 @@
 "use client";
 
 import { useAuth } from "@/app/providers";
-import { apolloClient } from "@/lib/apollo/client";
-import { useMutation, useQuery } from "@apollo/client/react";
+import { switchToBusinessWorkspace } from "@/lib/workspace-switch";
+import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { OWNER_ME_QUERY } from "@/graphql/queries/ownerMe.query";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { PLATFORM_BUSINESSES_QUERY } from "@/graphql/queries/platformBusinesses.query";
@@ -157,6 +157,7 @@ const DISPLAY_FILTERS: { label: string; value: "all" | DisplayStatus }[] = [
 
 export default function OwnerPage() {
   const router = useRouter();
+  const client = useApolloClient();
   const { ready, isAuthenticated, role } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
 
@@ -221,10 +222,14 @@ export default function OwnerPage() {
     }
     setSwitchingId(businessId);
     try {
-      await selectWorkspace({ variables: { businessId } });
-      switchToBusiness(businessId);
-      await apolloClient.clearStore();
-      router.replace("/");
+      await switchToBusinessWorkspace({
+        businessId,
+        selectWorkspace,
+        switchToBusiness,
+        router,
+        client,
+        refetchWorkspaces: refetchWs,
+      });
     } finally {
       setSwitchingId(null);
       setWsOpen(false);
@@ -246,7 +251,10 @@ export default function OwnerPage() {
     const t = setTimeout(() => setSearchDeb(search.trim()), 280);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => { setPage(1); }, [searchDeb, filterDisp]);
+  useEffect(() => {
+    const t = window.setTimeout(() => setPage(1), 0);
+    return () => window.clearTimeout(t);
+  }, [searchDeb, filterDisp]);
 
   const listVars = useMemo(() => {
     const input: Record<string, unknown> = {

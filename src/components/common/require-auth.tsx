@@ -11,6 +11,7 @@ import {
   shouldDestroySessionForProfileError,
 } from "@/lib/auth-session-guard";
 import { useMutation, useQuery } from "@apollo/client/react";
+import { motion } from "framer-motion";
 import { MessageCircle, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -27,6 +28,7 @@ export function RequireAuth({
   const prevAuthedRef = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const [loginMsg, setLoginMsg] = useState<string | null>(null);
+  const [loginRouting, setLoginRouting] = useState(false);
   const [lang, setLang] = useState<AppLang>("uz");
   const [selectWorkspace] = useMutation(SELECT_WORKSPACE_MUTATION);
 
@@ -36,15 +38,18 @@ export function RequireAuth({
         query: MY_WORKSPACES_QUERY,
         fetchPolicy: "network-only",
       });
-      const payload = (res.data as any)?.myWorkspaces as
-        | { items?: any[]; hasPlatformDashboard?: boolean }
+      const payload = (res.data as { myWorkspaces?: { items?: { business_id?: unknown }[]; hasPlatformDashboard?: boolean } })?.myWorkspaces as
+        | { items?: { business_id?: unknown }[]; hasPlatformDashboard?: boolean }
         | undefined;
-      const items = Array.isArray(payload?.items) ? payload!.items : [];
+      const items = Array.isArray(payload?.items) ? payload.items : [];
       const hasPlatform = Boolean(payload?.hasPlatformDashboard);
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        router.replace("/create-business");
+        return true;
+      }
       if (hasPlatform || items.length > 1) {
         router.replace("/workspaces");
-        return;
+        return true;
       }
       const only = items[0];
       const bid = Number(only?.business_id);
@@ -56,9 +61,13 @@ export function RequireAuth({
           // ignore
         }
         router.replace("/");
+        return true;
       }
+      router.replace("/create-business");
+      return true;
     } catch {
-      // ignore
+      router.replace("/create-business");
+      return true;
     }
   };
 
@@ -183,40 +192,44 @@ export function RequireAuth({
   if (!token) {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto min-h-dvh max-w-md px-4 pb-24 pt-6">
-          <div className="mb-6 flex items-center justify-end">
-            <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setStoredLang("uz")}
-                className={[
-                  "rounded-full px-3 py-1.5 transition-colors",
-                  lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-                ].join(" ")}
-              >
-                UZ
-              </button>
-              <button
-                type="button"
-                onClick={() => setStoredLang("ru")}
-                className={[
-                  "rounded-full px-3 py-1.5 transition-colors",
-                  lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-                ].join(" ")}
-              >
-                RU
-              </button>
+        <div className="mx-auto grid min-h-dvh max-w-md place-items-center px-4 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] pt-8">
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full rounded-[30px] border border-black/5 bg-white p-5 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08),0_2px_10px_rgba(15,23,42,0.04)]"
+          >
+            <div className="mb-2 flex justify-end">
+              <div className="flex shrink-0 items-center rounded-full border border-slate-200/80 bg-slate-50/80 p-0.5 text-[11px] font-bold text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => setStoredLang("uz")}
+                  className={[
+                    "h-7 rounded-full px-2.5 transition-all duration-200 active:scale-95",
+                    lang === "uz" ? "bg-white text-[#0284C7] shadow-[0_1px_6px_rgba(15,23,42,0.08)]" : "",
+                  ].join(" ")}
+                >
+                  UZ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStoredLang("ru")}
+                  className={[
+                    "h-7 rounded-full px-2.5 transition-all duration-200 active:scale-95",
+                    lang === "ru" ? "bg-white text-[#0284C7] shadow-[0_1px_6px_rgba(15,23,42,0.08)]" : "",
+                  ].join(" ")}
+                >
+                  RU
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="grid place-items-center">
-          <div className="w-full rounded-[28px] border border-black/5 bg-white p-6 text-center shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#00AEEF]/10 text-[#0077A3]">
+            <div className="mx-auto mt-1 flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#00AEEF]/10 text-[#0077A3] shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
               <ShieldCheck className="h-7 w-7" aria-hidden />
             </div>
 
-            <div className="mt-4 text-lg font-semibold text-[#0F172A]">{txt.loginWelcomeTitle}</div>
-            <div className="mt-1 text-sm text-gray-500">{txt.loginSubtitle}</div>
+            <div className="mt-5 text-lg font-semibold tracking-[-0.02em] text-[#0F172A]">{txt.loginWelcomeTitle}</div>
+            <div className="mx-auto mt-1.5 max-w-[280px] text-sm leading-5 text-gray-500">{txt.loginSubtitle}</div>
 
             {loginMsg ? <div className="mt-4 text-sm text-gray-600">{loginMsg}</div> : null}
 
@@ -224,12 +237,15 @@ export function RequireAuth({
               type="button"
               onClick={() => {
                 setLoginMsg(null);
+                setLoginRouting(true);
                 void (async () => {
                   const res = await loginWithTelegram();
                   if (res.ok) {
-                    await bootstrapWorkspaces();
+                    const routed = await bootstrapWorkspaces();
+                    if (!routed) setLoginRouting(false);
                     return;
                   }
+                  setLoginRouting(false);
                   if (res.reason === "OPEN_IN_TELEGRAM") {
                     setLoginMsg(txt.loginOpenInTelegram);
                     return;
@@ -241,16 +257,27 @@ export function RequireAuth({
                   setLoginMsg(txt.loginFailed);
                 })();
               }}
-              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3.5 text-sm font-semibold text-white transition active:scale-[0.99]"
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0284C7] py-3.5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(2,132,199,0.24)] transition-all duration-200 hover:bg-[#0278B5] active:scale-[0.985] active:shadow-[0_6px_16px_rgba(2,132,199,0.18)]"
             >
               <MessageCircle className="h-4 w-4" aria-hidden />
               {txt.loginContinueTelegram}
             </button>
 
-            <div className="mt-4 text-xs text-gray-400">{txt.loginTermsNote}</div>
-          </div>
-          </div>
+            <div className="mx-auto mt-4 max-w-[270px] text-xs leading-5 text-gray-400">{txt.loginTermsNote}</div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
 
+  if (loginRouting) {
+    return (
+      <div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
+          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="h-6 w-48 rounded-lg bg-gray-100" />
+            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
+          </div>
         </div>
       </div>
     );

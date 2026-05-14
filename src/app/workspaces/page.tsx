@@ -4,13 +4,14 @@ import { useAuth } from "@/app/providers";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useAppMode } from "@/lib/app-mode";
 import { useAppLang } from "@/lib/use-app-lang";
+import { switchToBusinessWorkspace, switchToPlatformWorkspace } from "@/lib/workspace-switch";
 import { WorkspacesPageSkeleton } from "@/components/workspaces/workspaces-page-skeleton";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
-import { useMutation, useQuery } from "@apollo/client/react";
+import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { Shield, Plus, Building2, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 type WorkspaceItem = {
   business_id: number;
@@ -34,6 +35,18 @@ type MyWorkspacesQueryData = {
 
 type Txt = (typeof t)[ProfileLang];
 
+function subscribeHydration() {
+  return () => undefined;
+}
+
+function getClientHydrationSnapshot() {
+  return true;
+}
+
+function getServerHydrationSnapshot() {
+  return false;
+}
+
 function statusBadge(status: string, txt: Txt) {
   const s = String(status || "").toLowerCase();
   if (s === "active") return { cls: "bg-emerald-50 text-emerald-800 ring-emerald-100", label: txt.workspacesStatusActive };
@@ -47,13 +60,15 @@ function statusBadge(status: string, txt: Txt) {
 
 export default function WorkspacesPage() {
   const router = useRouter();
+  const client = useApolloClient();
   const { txt } = useAppLang();
   const { ready, isAuthenticated } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
-  const [clientReady, setClientReady] = useState(false);
-  useEffect(() => {
-    setClientReady(true);
-  }, []);
+  const clientReady = useSyncExternalStore(
+    subscribeHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
 
   const token = useMemo(() => {
     if (!clientReady || typeof window === "undefined") return null;
@@ -87,7 +102,7 @@ export default function WorkspacesPage() {
   }, [toast]);
 
   const payload = data?.myWorkspaces;
-  const items = payload?.items ?? [];
+  const items = useMemo(() => payload?.items ?? [], [payload?.items]);
   const showPlatform = Boolean(payload?.hasPlatformDashboard);
   const canCreate = Boolean(payload?.canCreateBusiness);
 
@@ -113,7 +128,7 @@ export default function WorkspacesPage() {
           {showPlatform ? (
             <button
               type="button"
-              onClick={() => { switchToPlatform(); router.push("/owner"); }}
+              onClick={() => switchToPlatformWorkspace({ switchToPlatform, router, replace: false })}
               className="w-full rounded-[24px] border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:bg-slate-50 active:scale-[0.99]"
             >
               <div className="flex items-start justify-between gap-3">
@@ -156,10 +171,14 @@ export default function WorkspacesPage() {
                       void (async () => {
                         setBusyId(w.business_id);
                         try {
-                          await selectWorkspace({ variables: { businessId: w.business_id } });
-                          switchToBusiness(w.business_id);
-                          await refetch();
-                          router.replace("/");
+                          await switchToBusinessWorkspace({
+                            businessId: w.business_id,
+                            selectWorkspace,
+                            switchToBusiness,
+                            router,
+                            client,
+                            refetchWorkspaces: refetch,
+                          });
                         } finally {
                           setBusyId(null);
                         }

@@ -14,14 +14,6 @@ import { ArrowLeft, Building2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const BUSINESS_TYPE_SUGGESTIONS = [
-  "Cafe",
-  "Restaurant",
-  "Bakery",
-  "Beauty Salon",
-  "Gym",
-];
-
 export default function CreateBusinessPage() {
   const router = useRouter();
   const { ready, isAuthenticated, role } = useAuth();
@@ -103,8 +95,8 @@ export default function CreateBusinessPage() {
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-slate-100 text-slate-700">
             <Building2 className="h-6 w-6" aria-hidden />
           </div>
-          <div className="mt-4 text-lg font-semibold text-slate-900">{txt.registerTitle}</div>
-          <div className="mt-1 text-sm text-slate-500">{txt.registerSubtitle}</div>
+          <div className="mt-4 text-center text-lg font-semibold text-slate-900">{txt.registerTitle}</div>
+          <div className="mt-1 text-center text-sm text-slate-500">{txt.registerSubtitle}</div>
 
           <div className="mt-4 space-y-2">
             <input
@@ -130,7 +122,6 @@ export default function CreateBusinessPage() {
               onChange={(e) => setBizType(e.target.value)}
               onBlur={() => setBizTypeTouched(true)}
               placeholder={txt.registerTypePh}
-              list="business-type-suggestions"
               className={[
                 "w-full rounded-2xl border bg-white px-4 py-3 text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2",
                 bizTypeTouched && isBizTypeInvalid
@@ -138,11 +129,6 @@ export default function CreateBusinessPage() {
                   : "border-slate-200 focus:ring-slate-200",
               ].join(" ")}
             />
-            <datalist id="business-type-suggestions">
-              {BUSINESS_TYPE_SUGGESTIONS.map((item) => (
-                <option key={item} value={item} />
-              ))}
-            </datalist>
             {bizTypeTouched && isBizTypeInvalid ? (
               <div className="text-xs font-medium text-red-600">Business type is required.</div>
             ) : null}
@@ -194,7 +180,7 @@ export default function CreateBusinessPage() {
                 }
               })();
             }}
-            className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-slate-900 py-3 text-sm font-semibold text-white transition disabled:opacity-50 active:scale-[0.99]"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[#0284C7] py-3 text-sm font-semibold text-white transition disabled:opacity-50 active:scale-[0.99]"
           >
             {loading ? txt.registerCreating : txt.registerCreateBusiness}
           </button>

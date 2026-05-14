@@ -1,15 +1,16 @@
 import { loadEnvConfig } from "@next/env";
+import { randomUUID } from "crypto";
+import { mkdir, writeFile } from "fs/promises";
 import { NextResponse } from "next/server";
 import path from "path";
-import { fileURLToPath } from "url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 
-/** Project root (cwd can differ under some runners; route lives at src/app/upload). */
-const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const PROJECT_ROOT = process.cwd();
+const UPLOADS_DIR = path.join(PROJECT_ROOT, "public", "uploads", "broadcasts");
 
 function readUploadProxyUrl(): string | undefined {
   try {
@@ -24,17 +25,92 @@ function readUploadProxyUrl(): string | undefined {
   }
 }
 
+function readPublicAppUrl(): string | undefined {
+  const raw = (process.env.PUBLIC_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL)?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
 function extractPublicUrl(j: Record<string, unknown>): string | null {
   const nested = j.data;
   const nestedUrl =
     nested && typeof nested === "object" && nested !== null && "url" in nested
       ? (nested as { url?: unknown }).url
       : undefined;
-  const raw = j.url ?? j.secure_url ?? nestedUrl;
+  const urls = j.urls;
+  const firstUrl = Array.isArray(urls) ? urls.find((v) => typeof v === "string") : undefined;
+  const raw = j.url ?? j.secure_url ?? nestedUrl ?? firstUrl;
   const url = typeof raw === "string" ? raw.trim() : null;
   if (!url) return null;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
+  if (url.startsWith("/uploads/")) return url;
   return null;
+}
+
+function isSelfProxy(proxy: string | undefined, reqUrl: string) {
+  if (!proxy) return true;
+  try {
+    const target = new URL(proxy);
+    const current = new URL(reqUrl);
+    const targetPath = target.pathname.replace(/\/+$/, "");
+    if (targetPath !== "/upload") return false;
+    if (target.origin === current.origin) return true;
+
+    const targetPort = target.port || (target.protocol === "https:" ? "443" : "80");
+    const currentPort = current.port || (current.protocol === "https:" ? "443" : "80");
+    const targetIsLocal =
+      target.hostname === "localhost" ||
+      target.hostname === "127.0.0.1" ||
+      target.hostname === "0.0.0.0";
+    return targetIsLocal && targetPort === currentPort;
+  } catch {
+    return false;
+  }
+}
+
+function extFromType(type: string) {
+  if (type.includes("png")) return ".png";
+  if (type.includes("webp")) return ".webp";
+  if (type.includes("gif")) return ".gif";
+  return ".jpg";
+}
+
+async function saveLocal(file: File) {
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  const name = `${Date.now()}-${randomUUID()}${extFromType(file.type)}`;
+  await writeFile(path.join(UPLOADS_DIR, name), Buffer.from(await file.arrayBuffer()));
+  return `/uploads/broadcasts/${name}`;
+}
+
+function publicLocalUploadUrl(relativeUrl: string): string | null {
+  const publicAppUrl = readPublicAppUrl();
+  if (!publicAppUrl) {
+    return process.env.NODE_ENV === "production" ? null : relativeUrl;
+  }
+  if (process.env.NODE_ENV === "production" && !publicAppUrl.startsWith("https://")) {
+    return null;
+  }
+  return `${publicAppUrl}${relativeUrl}`;
+}
+
+function isDeployReachableUrl(url: string): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "https:") return false;
+    return host !== "localhost" && host !== "127.0.0.1" && host !== "0.0.0.0";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -53,9 +129,6 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const proxy = readUploadProxyUrl();
-  if (!proxy) {
-    return NextResponse.json({ error: "not_configured" }, { status: 503 });
-  }
 
   let formData: FormData;
   try {
@@ -75,8 +148,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "too_large" }, { status: 400 });
   }
 
+  if (isSelfProxy(proxy, req.url)) {
+    try {
+      if (process.env.NODE_ENV === "production" && !readPublicAppUrl()?.startsWith("https://")) {
+        return NextResponse.json(
+          { error: "not_configured", detail: "Use Cloudinary/S3 or set PUBLIC_APP_URL to an HTTPS host that serves /uploads." },
+          { status: 503 },
+        );
+      }
+      const localUrl = publicLocalUploadUrl(await saveLocal(file));
+      if (!localUrl) {
+        return NextResponse.json(
+          { error: "not_configured", detail: "Use Cloudinary/S3 or set PUBLIC_APP_URL to an HTTPS host that serves /uploads." },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json({ url: localUrl });
+    } catch {
+      return NextResponse.json({ error: "upload_failed" }, { status: 502 });
+    }
+  }
+
+  if (!proxy) {
+    return NextResponse.json({ error: "not_configured" }, { status: 503 });
+  }
+
   const upstream = new FormData();
   upstream.append("file", file);
+  upstream.append("files", file);
 
   const headers: HeadersInit = {};
   const auth = req.headers.get("authorization");
@@ -109,7 +208,7 @@ export async function POST(req: Request) {
   }
 
   const url = extractPublicUrl(body);
-  if (!url) {
+  if (!url || !isDeployReachableUrl(url)) {
     return NextResponse.json({ error: "bad_url" }, { status: 502 });
   }
 

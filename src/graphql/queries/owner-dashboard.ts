@@ -20,6 +20,7 @@ export const OWNER_DASHBOARD = gql`
       pendingVisits {
         id
         customerId
+        customerName
         visitTime
       }
     }

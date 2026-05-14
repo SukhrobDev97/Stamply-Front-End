@@ -19,10 +19,13 @@ function pickUrlFromJson(j: Record<string, unknown>): string | null {
     nested && typeof nested === "object" && nested !== null && "url" in nested
       ? (nested as { url?: unknown }).url
       : undefined;
-  const raw = j.url ?? j.secure_url ?? nestedUrl;
+  const urls = j.urls;
+  const firstUrl = Array.isArray(urls) ? urls.find((v) => typeof v === "string") : undefined;
+  const raw = j.url ?? j.secure_url ?? nestedUrl ?? firstUrl;
   const url = typeof raw === "string" ? raw.trim() : null;
   if (!url) return null;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
+  if (url.startsWith("/uploads/")) return url;
   return null;
 }
 

@@ -52,12 +52,14 @@ export default function CustomersPage() {
   const [q, setQ] = useState("");
   const { ready, isAuthenticated } = useAuth();
   const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
-    fetchPolicy: "network-only",
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
+    notifyOnNetworkStatusChange: true,
     skip: !ready || !isAuthenticated,
   });
 
   const filtered = useMemo(() => {
-    if (loading || error) return [];
+    if (error && !data) return [];
     const customers = data?.myCustomers ?? [];
     const s = q.trim().toLowerCase();
     if (!s) return customers;
@@ -67,7 +69,7 @@ export default function CustomersPage() {
         String(c.phone ?? "").toLowerCase().includes(s)
       );
     });
-  }, [data, error, loading, q]);
+  }, [data, error, q]);
 
   const customers = data?.myCustomers ?? [];
 
@@ -87,11 +89,11 @@ export default function CustomersPage() {
             <h1 className="text-xl font-semibold text-[#0F172A]">{txt.homeCustomers}</h1>
           </div>
 
-          {loading ? (
+          {loading && !data ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.homeLoading}
             </div>
-          ) : error ? (
+          ) : error && !data ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.customersFailed}
             </div>
@@ -107,6 +109,11 @@ export default function CustomersPage() {
               <div className="mt-3 text-xs text-gray-400">
                 {txt.customersTotalLabel}: {customers.length}
               </div>
+              {loading ? (
+                <div className="mt-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
+                  {txt.homeLoading}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2">
                 {filtered.length === 0 ? (
@@ -124,7 +131,7 @@ export default function CustomersPage() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-base font-semibold text-gray-900">{c.name}</div>
                         <div className="mt-1 text-sm text-gray-500">
-                          {c.phone} • {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
+                          {c.totalVisits} {txt.visitsMetaVisits} • {c.stampCount}{" "}
                           {txt.visitsMetaStamps}
                         </div>
                       </div>

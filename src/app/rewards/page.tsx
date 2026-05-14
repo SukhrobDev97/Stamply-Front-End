@@ -3,38 +3,25 @@
 import { BottomNav } from "@/components/common/bottom-nav";
 import { RequireAuth } from "@/components/common/require-auth";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
-import { CUSTOMER_DETAIL_QUERY } from "@/graphql/queries/customerDetail.query";
-import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
+import { LIST_MY_REWARDS_QUERY } from "@/graphql/queries/list-my-rewards.query";
 import { useAuth } from "@/app/providers";
 import { useAppLang } from "@/lib/use-app-lang";
-import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
+import { useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
-
-type Customer = {
-  id: number;
-  name?: string | null;
-  stampCount: number;
-};
-
-type MyCustomersQueryData = {
-  myCustomers: Customer[];
-};
+import { Suspense, useMemo, useState } from "react";
 
 type RewardRow = {
   id: number;
-  customerId: number;
+  customerId?: number | null;
+  customerName?: string | null;
   status: string;
   issuedAt?: string | null;
   redeemedAt?: string | null;
 };
 
-type CustomerDetailQueryResult = {
-  customerDetail: {
-    id: number;
-    rewards: { id: number; status: string; issuedAt?: string | null; redeemedAt?: string | null }[];
-  };
+type ListMyRewardsQueryData = {
+  listMyRewards: RewardRow[];
 };
 
 function isUnlocked(status: string) {
@@ -74,100 +61,35 @@ function RewardsPageFallback() {
 function RewardsPageInner() {
   const router = useRouter();
   const { txt } = useAppLang();
-  const client = useApolloClient();
   const { ready, isAuthenticated } = useAuth();
-  const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
-    fetchPolicy: "network-only",
+  const { data, loading, error } = useQuery<ListMyRewardsQueryData>(LIST_MY_REWARDS_QUERY, {
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
+    notifyOnNetworkStatusChange: true,
     skip: !ready || !isAuthenticated,
   });
   const [redeemReward, { loading: redeeming }] = useMutation<
     { redeemReward: boolean },
     { rewardId: number }
   >(REDEEM_REWARD_MUTATION);
+  const [redeemedIds, setRedeemedIds] = useState<Record<number, string>>({});
 
-  const customerNameById = useMemo(() => {
-    return new Map<number, string>(
-      (data?.myCustomers ?? []).map((c) => [
-        Number(c.id),
-        typeof c.name === "string" && c.name.trim() ? c.name : "Guest",
-      ]),
-    );
-  }, [data?.myCustomers]);
-  const nameForCustomerId = (id: number) => customerNameById.get(Number(id)) ?? "Guest";
-
-  // Don't filter by `stampCount >= 8` here:
-  // after issuing a reward, many backends reset stamp count, which would hide rewards entirely.
-  const customerIds = useMemo(() => {
-    return (data?.myCustomers ?? [])
-      .map((c) => Number(c.id))
-      .filter((id) => Number.isFinite(id));
-  }, [data?.myCustomers]);
-
-  const [rows, setRows] = useState<RewardRow[]>([]);
-  const [rowsLoading, setRowsLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (customerIds.length === 0) {
-        setRows([]);
-        return;
-      }
-      setRowsLoading(true);
-      try {
-        const results = await Promise.all(
-          customerIds.map((customerId) =>
-            client.query<CustomerDetailQueryResult>({
-              query: CUSTOMER_DETAIL_QUERY,
-              variables: { customerId },
-              fetchPolicy: "network-only",
-            }),
-          ),
-        );
-
-        if (cancelled) return;
-
-        const next: RewardRow[] = [];
-        for (const r of results) {
-          const detail = r.data?.customerDetail;
-          if (!detail) continue;
-          const rewards = detail?.rewards ?? [];
-          for (const rw of rewards) {
-            next.push({
-              id: Number(rw.id),
-              customerId: Number(detail.id),
-              status: String(rw.status ?? ""),
-              issuedAt: rw.issuedAt ?? null,
-              redeemedAt: rw.redeemedAt ?? null,
-            });
-          }
-        }
-
-        // Show unlocked first, then redeemed; newest first by issuedAt.
-        next.sort((a, b) => {
-          const sa = isUnlocked(a.status) ? 0 : isRedeemed(a.status) ? 1 : 2;
-          const sb = isUnlocked(b.status) ? 0 : isRedeemed(b.status) ? 1 : 2;
-          if (sa !== sb) return sa - sb;
-          const ta = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
-          const tb = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
-          return tb - ta;
-        });
-
-        setRows(next);
-      } catch {
-        if (cancelled) return;
-        setRows([]);
-      } finally {
-        if (!cancelled) setRowsLoading(false);
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, customerIds]);
+  const rows = useMemo(() => {
+    const next = (data?.listMyRewards ?? []).map((row) => {
+      const redeemedAt = redeemedIds[row.id];
+      return redeemedAt ? { ...row, status: "REDEEMED", redeemedAt } : row;
+    });
+    // Show unlocked first, then redeemed; newest first by issuedAt.
+    next.sort((a, b) => {
+      const sa = isUnlocked(a.status) ? 0 : isRedeemed(a.status) ? 1 : 2;
+      const sb = isUnlocked(b.status) ? 0 : isRedeemed(b.status) ? 1 : 2;
+      if (sa !== sb) return sa - sb;
+      const ta = a.issuedAt ? new Date(a.issuedAt).getTime() : 0;
+      const tb = b.issuedAt ? new Date(b.issuedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return next;
+  }, [data?.listMyRewards, redeemedIds]);
 
   const unlockedCount = rows.filter((r) => isUnlocked(r.status)).length;
 
@@ -176,11 +98,7 @@ function RewardsPageInner() {
       const res = await redeemReward({ variables: { rewardId: Number(rewardId) } });
       if (res.data?.redeemReward !== true) return;
       const now = new Date().toISOString();
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === rewardId ? { ...r, status: "REDEEMED", redeemedAt: now } : r,
-        ),
-      );
+      setRedeemedIds((prev) => ({ ...prev, [rewardId]: now }));
     } catch {
       // keep simple (no new toasts)
     }
@@ -202,7 +120,13 @@ function RewardsPageInner() {
         </div>
 
         <div className="mt-4 space-y-2">
-          {loading || rowsLoading ? (
+          {loading && rows.length > 0 ? (
+            <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
+              {txt.homeLoading}
+            </div>
+          ) : null}
+
+          {loading && rows.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.homeLoading}
             </div>
@@ -229,7 +153,7 @@ function RewardsPageInner() {
                 >
                   <div className="min-w-0">
                     <div className="text-base font-semibold text-gray-900">
-                      {nameForCustomerId(r.customerId)}
+                      {r.customerName || "Guest"}
                     </div>
                     <div className="text-xs text-gray-400">{dateLabel || "—"}</div>
                   </div>
@@ -239,7 +163,7 @@ function RewardsPageInner() {
                       type="button"
                       disabled={redeeming}
                       onClick={() => void onRedeem(r.id)}
-                      className="shrink-0 rounded-xl bg-black px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      className="shrink-0 rounded-xl bg-[#0284C7] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
                       {txt.rewardsRedeem}
                     </button>
