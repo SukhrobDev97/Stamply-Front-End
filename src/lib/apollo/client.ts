@@ -4,8 +4,31 @@ import { ApolloClient, HttpLink, InMemoryCache } from "@apollo/client";
 import { setContext } from "@apollo/client/link/context";
 import { onError } from "@apollo/client/link/error";
 
+const graphqlEnvUrl = process.env.NEXT_PUBLIC_GRAPHQL_URL;
+// #region agent log
+void fetch("http://127.0.0.1:7509/ingest/85fd1a1b-731f-4c62-aedd-a6b71e54eab5", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dc90e2" },
+  body: JSON.stringify({
+    sessionId: "dc90e2",
+    location: "src/lib/apollo/client.ts:graphqlEnv",
+    message: "NEXT_PUBLIC_GRAPHQL_URL at module init",
+    data: {
+      hasValue: Boolean(graphqlEnvUrl && String(graphqlEnvUrl).trim()),
+      isAbsolute: Boolean(
+        graphqlEnvUrl && /^https?:\/\//i.test(String(graphqlEnvUrl).trim()),
+      ),
+      isBareSlashGraphql: String(graphqlEnvUrl ?? "").trim() === "/graphql",
+      nodeEnv: process.env.NODE_ENV,
+    },
+    timestamp: Date.now(),
+    hypothesisId: "H-A-missing-or-empty-env",
+  }),
+}).catch(() => {});
+// #endregion
+
 const httpLink = new HttpLink({
-  uri: process.env.NEXT_PUBLIC_GRAPHQL_URL,
+  uri: graphqlEnvUrl,
   credentials: "omit",
 });
 
