@@ -1,3 +1,4 @@
+import { isLikelyImage } from "@/lib/is-likely-image";
 import { loadEnvConfig } from "@next/env";
 import { randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
@@ -90,8 +91,26 @@ async function saveLocal(file: File) {
   return `/uploads/broadcasts/${name}`;
 }
 
-function publicLocalUploadUrl(relativeUrl: string): string | null {
-  const publicAppUrl = readPublicAppUrl();
+/** HTTPS origin for image URLs (Telegram needs absolute links in production). */
+function requestPublicOrigin(req: Request): string | undefined {
+  try {
+    const fromUrl = new URL(req.url);
+    const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ?? req.headers.get("host") ?? fromUrl.host;
+    const proto =
+      req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ?? fromUrl.protocol.replace(":", "");
+    if (!host || !proto) return undefined;
+    return `${proto}://${host}`.replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function resolvePublicAppUrl(req: Request): string | undefined {
+  return readPublicAppUrl() ?? requestPublicOrigin(req);
+}
+
+function publicLocalUploadUrl(relativeUrl: string, req: Request): string | null {
+  const publicAppUrl = resolvePublicAppUrl(req);
   if (!publicAppUrl) {
     return process.env.NODE_ENV === "production" ? null : relativeUrl;
   }
@@ -141,7 +160,7 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "no_file" }, { status: 400 });
   }
-  if (!file.type.startsWith("image/")) {
+  if (!isLikelyImage(file)) {
     return NextResponse.json({ error: "not_image" }, { status: 400 });
   }
   if (file.size > MAX_BYTES) {
@@ -150,16 +169,14 @@ export async function POST(req: Request) {
 
   if (isSelfProxy(proxy, req.url)) {
     try {
-      if (process.env.NODE_ENV === "production" && !readPublicAppUrl()?.startsWith("https://")) {
-        return NextResponse.json(
-          { error: "not_configured", detail: "Use Cloudinary/S3 or set PUBLIC_APP_URL to an HTTPS host that serves /uploads." },
-          { status: 503 },
-        );
-      }
-      const localUrl = publicLocalUploadUrl(await saveLocal(file));
+      const localUrl = publicLocalUploadUrl(await saveLocal(file), req);
       if (!localUrl) {
         return NextResponse.json(
-          { error: "not_configured", detail: "Use Cloudinary/S3 or set PUBLIC_APP_URL to an HTTPS host that serves /uploads." },
+          {
+            error: "not_configured",
+            detail:
+              "Set PUBLIC_APP_URL to your HTTPS app URL (e.g. ngrok), or UPLOAD_PROXY_URL to external storage. UPLOAD_PROXY_URL can stay empty for local public/uploads.",
+          },
           { status: 503 },
         );
       }

@@ -2,6 +2,8 @@
 
 import { useQuery } from "@apollo/client/react";
 import { DASHBOARD_STATS_QUERY } from "@/graphql/queries/dashboard.query";
+import { userMessageFromUnknown } from "@/lib/api";
+import { useAppLang } from "@/lib/use-app-lang";
 
 type DashboardStatsData = {
   todayVisits?: number;
@@ -12,10 +14,11 @@ type DashboardStatsData = {
 };
 
 export default function DashboardPage() {
+  const { lang } = useAppLang();
   const { data, loading, error } = useQuery<{ getDashboardStats: DashboardStatsData }>(DASHBOARD_STATS_QUERY);
 
   if (loading) return <p>Loading...</p>;
-  if (error) return <p>{error.message}</p>;
+  if (error) return <p>{userMessageFromUnknown(error, lang)}</p>;
 
   const stats = data?.getDashboardStats;
 

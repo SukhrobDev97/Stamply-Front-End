@@ -269,7 +269,6 @@ export default function ProfilePage() {
         ) : error ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
             {txt.failedLoadProfile}
-            {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
           </div>
         ) : (
           <div className="space-y-3">

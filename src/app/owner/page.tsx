@@ -1,6 +1,8 @@
 "use client";
 
 import { useAuth } from "@/app/providers";
+import { userMessageFromUnknown } from "@/lib/api";
+import { useAppLang } from "@/lib/use-app-lang";
 import { switchToBusinessWorkspace } from "@/lib/workspace-switch";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { OWNER_ME_QUERY } from "@/graphql/queries/ownerMe.query";
@@ -158,6 +160,7 @@ const DISPLAY_FILTERS: { label: string; value: "all" | DisplayStatus }[] = [
 export default function OwnerPage() {
   const router = useRouter();
   const client = useApolloClient();
+  const { lang } = useAppLang();
   const { ready, isAuthenticated, role } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
 
@@ -443,7 +446,7 @@ export default function OwnerPage() {
 
         {/* Businesses list */}
         {error ? (
-          <div className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-600">{error.message}</div>
+          <div className="rounded-2xl border border-red-200 bg-white p-4 text-sm text-red-600">{userMessageFromUnknown(error, lang)}</div>
         ) : loading && items.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">Loading…</div>
         ) : items.length === 0 ? (
@@ -585,7 +588,7 @@ export default function OwnerPage() {
               {detail.loading && !detail.data ? (
                 <div className="text-sm text-slate-500">Loading…</div>
               ) : detail.error ? (
-                <div className="text-sm text-red-600">{detail.error.message}</div>
+                <div className="text-sm text-red-600">{userMessageFromUnknown(detail.error, lang)}</div>
               ) : detail.data ? (() => {
                 const d = detail.data.platformBusiness;
                 const dl = daysLeft(d.trialEndsAt);

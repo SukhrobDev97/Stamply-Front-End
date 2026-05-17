@@ -1,26 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t, type ProfileLang } from "@/app/profile/copy";
-import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
+import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
 
-/** Reads `lang` from localStorage and stays in sync with Home / Login switcher. */
+function readStoredLang(): ProfileLang {
+  try {
+    const v = localStorage.getItem("lang");
+    if (v === "ru" || v === "uz") return v;
+  } catch {
+    // ignore
+  }
+  return "uz";
+}
+
+/** Reads `lang` from localStorage and stays in sync across tabs / components. */
 export function useAppLang() {
-  const [lang, setLang] = useState<ProfileLang>("uz");
+  const [lang, setLangState] = useState<ProfileLang>("uz");
 
   useEffect(() => {
-    const apply = () => {
-      try {
-        const v = localStorage.getItem("lang");
-        if (v === "ru" || v === "uz") setLang(v);
-      } catch {
-        // ignore
-      }
+    const apply = (e?: Event) => {
+      const fromEvent =
+        e instanceof CustomEvent && (e.detail === "ru" || e.detail === "uz")
+          ? (e.detail as AppLang)
+          : null;
+      setLangState(fromEvent ?? readStoredLang());
     };
     apply();
     window.addEventListener(STAMPLY_LANG_CHANGED, apply);
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "lang") apply();
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key === "lang") apply();
     };
     window.addEventListener("storage", onStorage);
     return () => {
@@ -29,5 +38,11 @@ export function useAppLang() {
     };
   }, []);
 
-  return { lang, txt: t[lang] } as const;
+  /** Immediate UI update + persist (avoids mixed uz/ru labels during async event roundtrip). */
+  const setLang = useCallback((next: ProfileLang) => {
+    setLangState(next);
+    setStoredLang(next);
+  }, []);
+
+  return { lang, txt: t[lang], setLang } as const;
 }

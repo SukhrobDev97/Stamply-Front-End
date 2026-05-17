@@ -11,6 +11,7 @@ import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.m
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { Shield, Plus, Building2, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { userMessageFromUnknown } from "@/lib/api";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 type WorkspaceItem = {
@@ -61,7 +62,7 @@ function statusBadge(status: string, txt: Txt) {
 export default function WorkspacesPage() {
   const router = useRouter();
   const client = useApolloClient();
-  const { txt } = useAppLang();
+  const { txt, lang } = useAppLang();
   const { ready, isAuthenticated } = useAuth();
   const { switchToPlatform, switchToBusiness } = useAppMode();
   const clientReady = useSyncExternalStore(
@@ -148,7 +149,7 @@ export default function WorkspacesPage() {
 
           {error ? (
             <div className="rounded-[24px] border border-red-200 bg-white p-5 text-sm text-red-600 shadow-sm">
-              {error.message}
+              {userMessageFromUnknown(error, lang)}
             </div>
           ) : (
             <>

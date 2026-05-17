@@ -7,9 +7,12 @@ import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
+import { AuthStatusPanel } from "@/components/common/auth-status-panel";
 import {
+  profileApolloErrorOnlyRecoverable,
   shouldDestroySessionForProfileError,
 } from "@/lib/auth-session-guard";
+import { mapApiErrorToUserMessage, normalizeApiError } from "@/lib/api";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import { MessageCircle, ShieldCheck } from "lucide-react";
@@ -94,7 +97,12 @@ export function RequireAuth({
 
   const txt = t[lang];
 
-  const { loading: validating, error: profileError, data: profileData } = useQuery(PROFILE_QUERY, {
+  const {
+    loading: validating,
+    error: profileError,
+    data: profileData,
+    refetch: refetchProfile,
+  } = useQuery(PROFILE_QUERY, {
     skip: !ready || !token || isPlatformOwner,
     fetchPolicy: "network-only",
   });
@@ -302,27 +310,21 @@ export function RequireAuth({
 
   if (fatalProfile) {
     return (
-      <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
-          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="h-6 w-48 rounded-lg bg-gray-100" />
-            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
-          </div>
-        </div>
-      </div>
+      <AuthStatusPanel
+        title={txt.profileLoadError}
+        body={mapApiErrorToUserMessage(normalizeApiError(profileError), lang)}
+      />
     );
   }
 
-  if (profileError) {
+  if (profileError && !profileApolloErrorOnlyRecoverable(profileError)) {
     return (
-      <div className="min-h-dvh bg-[#f7f7f8] text-black">
-        <div className="mx-auto max-w-md px-4 pt-10 pb-32">
-          <div className="rounded-2xl border border-black/5 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
-            <div className="h-6 w-48 rounded-lg bg-gray-100" />
-            <div className="mt-3 h-10 rounded-xl bg-gray-100" />
-          </div>
-        </div>
-      </div>
+      <AuthStatusPanel
+        title={txt.profileLoadError}
+        body={mapApiErrorToUserMessage(normalizeApiError(profileError), lang)}
+        actionLabel={txt.profileRetry}
+        onAction={() => void refetchProfile()}
+      />
     );
   }
 

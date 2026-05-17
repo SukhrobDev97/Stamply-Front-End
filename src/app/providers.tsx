@@ -13,7 +13,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppLifecycle } from "@/components/common/app-lifecycle";
+import { StamplyDevTools } from "@/components/common/stamply-dev-tools";
+import { ToastProvider } from "@/components/providers/toast-provider";
 import { AppModeProvider } from "@/lib/app-mode";
+import { getPrimaryErrorCode } from "@/lib/api";
 
 type AuthState = {
   accessToken: string | null;
@@ -72,9 +76,6 @@ function AuthGate({
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData ?? "";
 
-    console.log("TG INIT DATA:", initData);
-    console.log("SENDING LOGIN REQUEST");
-
     if (!initData) {
       return { ok: false as const, reason: "OPEN_IN_TELEGRAM" };
     }
@@ -112,17 +113,16 @@ function AuthGate({
       } catch {
         // ignore; RequireAuth/profile validation will handle invalid sessions
       }
-      console.log("TOKEN AFTER LOGIN:", localStorage.getItem("accessToken"));
       return { ok: true as const };
     } catch (e) {
-      console.log("LOGIN ERROR:", e);
-      console.log("GRAPHQL ERROR:", (e as any)?.graphQLErrors);
-      console.log("NETWORK ERROR:", (e as any)?.networkError);
-      const msg = (e as any)?.message ? String((e as any).message) : "LOGIN_FAILED";
-      return {
-        ok: false as const,
-        reason: msg.includes("USER_NOT_REGISTERED") ? "USER_NOT_REGISTERED" : msg,
-      };
+      const code = getPrimaryErrorCode(e);
+      if (code === "USER_NOT_REGISTERED") {
+        return { ok: false as const, reason: "USER_NOT_REGISTERED" };
+      }
+      if (code === "INVALID_TELEGRAM_AUTH") {
+        return { ok: false as const, reason: "INVALID_TELEGRAM_AUTH" };
+      }
+      return { ok: false as const, reason: "LOGIN_FAILED" };
     }
   };
 
@@ -237,6 +237,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <AppModeProvider initialRole={role}>
       <ApolloProvider client={apolloClient}>
+        <ToastProvider>
         <AuthGate
           accessToken={accessToken}
           isAuthenticated={isAuthenticated}
@@ -253,7 +254,10 @@ export function Providers({ children }: { children: ReactNode }) {
           decodeJwtPayload={decodeJwtPayload}
         >
           {children}
+          <AppLifecycle />
+          <StamplyDevTools />
         </AuthGate>
+        </ToastProvider>
       </ApolloProvider>
     </AppModeProvider>
   );

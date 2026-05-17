@@ -41,6 +41,11 @@ export const t = {
       "Davom etish orqali Telegram orqali autentifikatsiyadan foydalanishga rozilik bildirasiz.",
     loginOpenInTelegram: "Davom ettirish uchun Telegram ichidan oching.",
     loginFailed: "Kirish amalga oshmadi. Qayta urinib ko‘ring.",
+    errorsPageTitle: "Xatolik yuz berdi",
+    errorsPageBody: "Ilovani yuklab bo‘lmadi. Qayta urinib ko‘ring.",
+    errorsRetry: "Qayta urinish",
+    profileLoadError: "Profil yuklanmadi",
+    profileRetry: "Qayta urinish",
 
     registerCreatingTitle: "Biznes yaratilmoqda…",
     registerCreatingSubtitle: "Sozlash tugallanmoqda. Iltimos, kuting.",
@@ -140,7 +145,7 @@ export const t = {
     visitsRecentReward: "mukofot ochildi",
     visitsRecentStamp: "shtamp qo‘shildi",
     visitsModalTitle: "🎉 Mukofot ochildi!",
-    visitsModalSubtitle: "Mijoz 8 shtampga ega bo‘ldi",
+    visitsModalSubtitle: "Mijoz 10 shtampga ega bo‘ldi",
     visitsModalButton: "Mukofot berish",
     visitsRewardGiven: "Mukofot berildi",
 
@@ -189,10 +194,11 @@ export const t = {
     broadcastLimitReached: "Kuniga faqat 1 ta xabar yuborish mumkin",
     broadcastSendFailed: "Yuborish muvaffaqiyatsiz",
     broadcastImageTooBig: "Rasm juda katta (maks. 2 MB)",
+    broadcastImageUnsupported: "Faqat rasm fayllari qo‘llab-quvvatlanadi (JPG, PNG, WEBP, HEIC)",
     broadcastMaxImages: "Maksimum 2 ta rasm",
     broadcastImageUploading: "Yuklanmoqda…",
     broadcastUploadNotConfigured:
-      "Rasm yuklash: server .env da UPLOAD_PROXY_URL (POST file → { url }), so‘ng dev ni qayta ishga tushiring.",
+      "Rasm saqlash sozlanmagan: .env da PUBLIC_APP_URL (HTTPS, masalan ngrok) yoki UPLOAD_PROXY_URL qo‘ying, dev ni qayta ishga tushiring.",
     broadcastUploadUpstreamFailed:
       "Saqlash serveri javob bermadi yoki to‘g‘ri URL qaytarmadi. UPLOAD_PROXY_URL dagi endpoint va JSON { url } ni tekshiring.",
     broadcastUploadBadUrl: "Javobda rasm uchun HTTPS/HTTP URL topilmadi (JSONda url / secure_url).",
@@ -253,6 +259,11 @@ export const t = {
       "Продолжая, вы соглашаетесь на аутентификацию через Telegram.",
     loginOpenInTelegram: "Откройте приложение внутри Telegram, чтобы продолжить.",
     loginFailed: "Не удалось войти. Попробуйте ещё раз.",
+    errorsPageTitle: "Произошла ошибка",
+    errorsPageBody: "Не удалось загрузить приложение. Попробуйте снова.",
+    errorsRetry: "Повторить",
+    profileLoadError: "Не удалось загрузить профиль",
+    profileRetry: "Повторить",
 
     registerCreatingTitle: "Создаём бизнес…",
     registerCreatingSubtitle: "Завершаем настройку. Подождите.",
@@ -401,10 +412,11 @@ export const t = {
     broadcastLimitReached: "Можно отправить только 1 сообщение в день",
     broadcastSendFailed: "Не удалось отправить",
     broadcastImageTooBig: "Файл слишком большой (макс. 2 МБ)",
+    broadcastImageUnsupported: "Поддерживаются только изображения (JPG, PNG, WEBP, HEIC)",
     broadcastMaxImages: "Не больше 2 изображений",
     broadcastImageUploading: "Загрузка…",
     broadcastUploadNotConfigured:
-      "Загрузка: UPLOAD_PROXY_URL на сервере (.env), затем перезапуск dev.",
+      "Загрузка не настроена: PUBLIC_APP_URL (HTTPS) или UPLOAD_PROXY_URL в .env, затем перезапуск.",
     broadcastUploadUpstreamFailed:
       "Сервер хранения не ответил или вернул неверный URL. Проверьте endpoint в UPLOAD_PROXY_URL и JSON { url }.",
     broadcastUploadBadUrl: "В ответе нет корректной ссылки (поля url / secure_url в JSON).",

@@ -14,8 +14,9 @@ import { useAppMode } from "@/lib/app-mode";
 import { switchToBusinessWorkspace, switchToPlatformWorkspace } from "@/lib/workspace-switch";
 import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
-import { setStoredLang, STAMPLY_LANG_CHANGED } from "@/lib/lang";
+import { useAppLang } from "@/lib/use-app-lang";
 import { openStamplySupportTelegram } from "@/lib/support-telegram";
+import { isBusinessInactiveApiError, userMessageFromUnknown } from "@/lib/api";
 import { gql } from "@apollo/client";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
@@ -34,7 +35,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 type PendingVisit = {
   id: number;
   customerId: number;
@@ -106,20 +107,6 @@ type MyWorkspacesQueryData = {
 function isWorkspaceDeactivated(status?: string | null) {
   const s = String(status || "").toLowerCase();
   return s === "blocked" || s === "deactivated";
-}
-
-function isBusinessInactiveDashboardError(err: unknown): boolean {
-  const e = err as { graphQLErrors?: readonly { message?: string; extensions?: unknown }[] };
-  const list = e?.graphQLErrors ?? [];
-  if (!list.length) return false;
-  return list.some((x) => {
-    const m = String(x.message ?? "").toUpperCase();
-    if (m.includes("BUSINESS_INACTIVE")) return true;
-    if (m.includes("TRIAL_EXPIRED")) return true;
-    if (m.includes("BUSINESS_BLOCKED")) return true;
-    const ext = JSON.stringify(x.extensions ?? {});
-    return ext.includes("BUSINESS_INACTIVE") || ext.includes("TRIAL_EXPIRED") || ext.includes("BUSINESS_BLOCKED");
-  });
 }
 
 const APPROVE_VISIT_MUTATION = gql`
@@ -216,38 +203,13 @@ function OwnerHome() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  const [lang, setLang] = useState<ProfileLang>("uz");
-
-  useEffect(() => {
-    const apply = () => {
-      try {
-        const v = localStorage.getItem("lang");
-        if (v === "ru" || v === "uz") setLang(v);
-      } catch {
-        // ignore
-      }
-    };
-    apply();
-    window.addEventListener(STAMPLY_LANG_CHANGED, apply);
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "lang") apply();
-    };
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(STAMPLY_LANG_CHANGED, apply);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  const setLangPersist = useCallback((next: ProfileLang) => {
-    setStoredLang(next);
-  }, []);
-
-  const txt = t[lang];
+  const { lang, txt, setLang: setLangPersist } = useAppLang();
   const txtRef = useRef(txt);
+  const langRef = useRef(lang);
   useEffect(() => {
     txtRef.current = txt;
-  }, [txt]);
+    langRef.current = lang;
+  }, [txt, lang]);
 
   useEffect(() => {
     if (!ready) return;
@@ -294,9 +256,7 @@ function OwnerHome() {
   >(APPROVE_VISIT_MUTATION, {
     onError: (e) => {
       const cur = txtRef.current;
-      const msg = e?.message ? `${cur.homeApproveError}: ${e.message}` : cur.homeFailed;
-      console.error("approveVisit error:", e);
-      setToast(msg);
+      setToast(userMessageFromUnknown(e, langRef.current));
     },
   });
   const pendingModal = useOverlayModal();
@@ -384,6 +344,8 @@ function OwnerHome() {
         refreshDashboard: true,
       });
       setWorkspaceOpen(false);
+    } catch (e) {
+      setToast(userMessageFromUnknown(e, lang));
     } finally {
       setSwitchingTo(null);
     }
@@ -400,7 +362,7 @@ function OwnerHome() {
     clientReady &&
     ready &&
     !!token &&
-    (isBusinessInactiveDashboardError(error) ||
+    (isBusinessInactiveApiError(error) ||
       (!workspacesLoading &&
         activeBusinessId != null &&
         workspaceRowForActiveBusiness != null &&
@@ -416,13 +378,13 @@ function OwnerHome() {
   const noActiveWorkspace = workspacesHydrated && shouldSkipBusiness;
 
   // IMPORTANT: Keep these returns after all hooks above (Rules of Hooks).
-  if (error && !data && !isBusinessInactiveDashboardError(error)) {
+  if (error && !data && !isBusinessInactiveApiError(error)) {
     return (
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pt-10 pb-28">
           <div className="rounded-2xl border border-black/5 bg-white p-4 text-sm text-gray-500 shadow-sm">
             {txt.homeFailedDashboard}
-            {error?.message ? <div className="mt-2 text-xs text-gray-400">{error.message}</div> : null}
+            
           </div>
         </div>
         <BottomNav currentKey="home" />
@@ -684,6 +646,7 @@ function OwnerHome() {
         </div>
 
         <Link
+          key={`visits-today-${lang}`}
           href="/visits"
           className={[
             "group relative flex h-[190px] w-full overflow-hidden rounded-[28px] p-5 text-left text-white",
@@ -700,7 +663,7 @@ function OwnerHome() {
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/22 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.34)] backdrop-blur-md">
               <TrendingUp size={20} strokeWidth={2.45} />
             </span>
-            <span className="mt-4 text-[14px] font-semibold tracking-wide text-white/80">
+            <span key={`label-${lang}`} className="mt-4 text-[14px] font-semibold tracking-wide text-white/80">
               {txt.homeVisitsToday}
             </span>
             <span className="mt-1 text-[58px] font-extrabold leading-none tracking-[-0.055em] text-white tabular-nums">
@@ -720,7 +683,9 @@ function OwnerHome() {
                 {formatVisitDeltaPercent(stats?.percentChange)}
               </span>
               <span className="h-1 w-1 shrink-0 rounded-full bg-white/55" />
-              <span className="leading-none">{txt.homeVsYesterday}</span>
+              <span key={`vs-${lang}`} className="leading-none">
+                {txt.homeVsYesterday}
+              </span>
             </span>
           </div>
 

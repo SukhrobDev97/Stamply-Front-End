@@ -9,7 +9,10 @@ import { BROADCASTS_QUERY } from "@/graphql/queries/broadcasts.query";
 import { GET_BROADCAST_QUERY } from "@/graphql/queries/getBroadcast.query";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import { useAppLang } from "@/lib/use-app-lang";
-import { BroadcastImageUploadError, uploadBroadcastImage } from "@/lib/upload-broadcast-image";
+import { isLikelyImage } from "@/lib/is-likely-image";
+import { stamplyDebugLog } from "@/lib/stamply-debug-log";
+import { getPrimaryErrorCode, mapApiErrorToUserMessage, normalizeApiError } from "@/lib/api";
+import { UploadBroadcastImageError, uploadBroadcastImage } from "@/lib/upload-broadcast-image";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { ArrowLeft, ImagePlus, Loader2, X } from "lucide-react";
 import Link from "next/link";
@@ -53,21 +56,6 @@ type BroadcastsQueryData = {
 type DeleteBroadcastData = {
   deleteBroadcast: boolean;
 };
-
-function extractGraphQLErrorCode(err: unknown): string | undefined {
-  const g = err as { graphQLErrors?: { extensions?: { code?: string }; message?: string }[]; message?: string };
-  const code = g?.graphQLErrors?.[0]?.extensions?.code;
-  if (typeof code === "string") return code;
-  const msg = g?.graphQLErrors?.[0]?.message ?? g?.message ?? "";
-  if (String(msg).includes("BROADCAST_LIMIT_REACHED")) return "BROADCAST_LIMIT_REACHED";
-  return undefined;
-}
-
-function firstGraphQLErrorMessage(err: unknown): string | undefined {
-  const g = err as { graphQLErrors?: { message?: string }[] };
-  const m = g?.graphQLErrors?.[0]?.message;
-  return typeof m === "string" && m.trim() ? m.trim() : undefined;
-}
 
 function parseBroadcastIdAsInt(raw: number | string | null | undefined): number | null {
   if (raw == null) return null;
@@ -131,18 +119,28 @@ export default function BroadcastPage() {
 
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<string[]>([]);
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [pendingUploadPreview, setPendingUploadPreview] = useState<string | null>(null);
   const imagesRef = useRef<string[]>([]);
-  const previewUrlsRef = useRef<string[]>([]);
+  const pendingPreviewRef = useRef<string | null>(null);
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
   useEffect(() => {
     return () => {
-      for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
-      previewUrlsRef.current = [];
+      if (pendingPreviewRef.current) {
+        URL.revokeObjectURL(pendingPreviewRef.current);
+        pendingPreviewRef.current = null;
+      }
     };
   }, []);
+
+  const clearPendingPreview = () => {
+    if (pendingPreviewRef.current) {
+      URL.revokeObjectURL(pendingPreviewRef.current);
+      pendingPreviewRef.current = null;
+    }
+    setPendingUploadPreview(null);
+  };
   const [submitting, setSubmitting] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [pollTargetId, setPollTargetId] = useState<number | null>(null);
@@ -219,10 +217,8 @@ export default function BroadcastPage() {
           setPollTargetId(null);
           setRemoteStatus(null);
           setMessage("");
-          for (const u of previewUrlsRef.current) URL.revokeObjectURL(u);
-          previewUrlsRef.current = [];
+          clearPendingPreview();
           setImages([]);
-          setImagePreviews([]);
           void client.refetchQueries({ include: [BROADCASTS_QUERY] });
         } else if (st === "FAILED") {
           setBanner(txt.broadcastFailed);
@@ -248,7 +244,8 @@ export default function BroadcastPage() {
 
   useEffect(() => {
     if (!formToast) return;
-    const t = window.setTimeout(() => setFormToast(null), 2200);
+    const ms = formToast.includes("(") ? 5000 : 2200;
+    const t = window.setTimeout(() => setFormToast(null), ms);
     return () => window.clearTimeout(t);
   }, [formToast]);
 
@@ -258,6 +255,8 @@ export default function BroadcastPage() {
     input.value = "";
     if (!picked.length) return;
 
+    stamplyDebugLog("broadcast", `picker: ${picked.length} file(s)`);
+
     const room = MAX_IMAGES - imagesRef.current.length;
     if (room <= 0) {
       setFormToast(txt.broadcastMaxImages);
@@ -266,32 +265,31 @@ export default function BroadcastPage() {
 
     setImageUploading(true);
     const add: string[] = [];
-    const addPreviews: string[] = [];
     try {
       for (const f of picked.slice(0, room)) {
-        if (!f.type.startsWith("image/")) continue;
+        if (!isLikelyImage(f)) {
+          stamplyDebugLog("broadcast", "rejected: not an image", { name: f.name, type: f.type || "(empty)" });
+          setFormToast(txt.broadcastImageUnsupported);
+          continue;
+        }
         if (f.size > MAX_IMAGE_BYTES) {
           setFormToast(txt.broadcastImageTooBig);
           continue;
         }
+        clearPendingPreview();
         const previewUrl = URL.createObjectURL(f);
-        previewUrlsRef.current.push(previewUrl);
+        pendingPreviewRef.current = previewUrl;
+        setPendingUploadPreview(previewUrl);
         try {
           const url = await uploadBroadcastImage(f);
           add.push(url);
-          addPreviews.push(previewUrl);
+          setImages((prev) => [...prev, url].slice(0, MAX_IMAGES));
         } catch (err) {
-          URL.revokeObjectURL(previewUrl);
-          previewUrlsRef.current = previewUrlsRef.current.filter((u) => u !== previewUrl);
-          if (err instanceof BroadcastImageUploadError) {
-            if (err.code === "not_configured") setFormToast(txt.broadcastUploadNotConfigured);
-            else if (err.code === "bad_url") setFormToast(txt.broadcastUploadBadUrl);
-            else if (err.code === "upload_failed") setFormToast(txt.broadcastUploadUpstreamFailed);
-            else setFormToast(txt.broadcastUploadFailed);
-          } else {
-            setFormToast(txt.broadcastUploadFailed);
-          }
+          const api = err instanceof UploadBroadcastImageError ? err.apiError : normalizeApiError(err);
+          setFormToast(mapApiErrorToUserMessage(api, lang));
           break;
+        } finally {
+          clearPendingPreview();
         }
         if (add.length >= room) break;
       }
@@ -300,8 +298,6 @@ export default function BroadcastPage() {
     }
 
     if (add.length === 0) return;
-    setImages((prev) => [...prev, ...add].slice(0, MAX_IMAGES));
-    setImagePreviews((prev) => [...prev, ...addPreviews].slice(0, MAX_IMAGES));
   };
 
   const onSubmit = async () => {
@@ -335,15 +331,20 @@ export default function BroadcastPage() {
         setBanner(txt.broadcastSending);
         return;
       }
-      const code = extractGraphQLErrorCode({ graphQLErrors: errs });
-      const detail = errs[0]?.message?.trim();
-      const fallback = code === "BROADCAST_LIMIT_REACHED" ? txt.broadcastLimitReached : txt.broadcastSendFailed;
-      setFormToast(detail && detail.length < 200 ? `${fallback} (${detail})` : fallback);
+      const code = errs[0]?.extensions?.code;
+      const apiCode = typeof code === "string" ? code : "UNKNOWN_ERROR";
+      setFormToast(
+        apiCode === "BROADCAST_LIMIT_REACHED"
+          ? txt.broadcastLimitReached
+          : mapApiErrorToUserMessage({ code: apiCode, message: apiCode }, lang),
+      );
     } catch (err) {
-      const code = extractGraphQLErrorCode(err);
-      const detail = firstGraphQLErrorMessage(err);
-      const fallback = code === "BROADCAST_LIMIT_REACHED" ? txt.broadcastLimitReached : txt.broadcastSendFailed;
-      setFormToast(detail && detail.length < 200 ? `${fallback} (${detail})` : fallback);
+      const code = getPrimaryErrorCode(err);
+      setFormToast(
+        code === "BROADCAST_LIMIT_REACHED"
+          ? txt.broadcastLimitReached
+          : mapApiErrorToUserMessage(normalizeApiError(err), lang),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -440,27 +441,23 @@ export default function BroadcastPage() {
                     accept="image/*"
                     multiple
                     className="sr-only"
-                    disabled={formLocked || images.length >= MAX_IMAGES || imageUploading}
+                    disabled={
+                      formLocked ||
+                      images.length + (pendingUploadPreview ? 1 : 0) >= MAX_IMAGES ||
+                      imageUploading
+                    }
                     onChange={(e) => void onPickFiles(e)}
                   />
                   <div className="mt-2 flex flex-wrap gap-2">
                     {images.map((src, i) => (
                       <div key={`${i}-${src.slice(0, 64)}`} className="relative h-20 w-20 overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={imagePreviews[i] ?? src} alt="" className="h-full w-full object-cover" />
+                        <img src={src} alt="" className="h-full w-full object-cover" />
                         <button
                           type="button"
                           disabled={formLocked}
                           onClick={() => {
                             setImages((prev) => prev.filter((_, j) => j !== i));
-                            setImagePreviews((prev) => {
-                              const target = prev[i];
-                              if (target) {
-                                URL.revokeObjectURL(target);
-                                previewUrlsRef.current = previewUrlsRef.current.filter((u) => u !== target);
-                              }
-                              return prev.filter((_, j) => j !== i);
-                            });
                           }}
                           className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white disabled:opacity-50"
                           aria-label={txt.broadcastRemoveImage}
@@ -469,12 +466,25 @@ export default function BroadcastPage() {
                         </button>
                       </div>
                     ))}
-                    {images.length < MAX_IMAGES ? (
+                    {pendingUploadPreview ? (
+                      <div className="relative h-20 w-20 overflow-hidden rounded-xl border border-gray-200 bg-gray-50 opacity-80">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={pendingUploadPreview} alt="" className="h-full w-full object-cover" />
+                        <div className="absolute inset-0 grid place-items-center bg-black/20">
+                          <Loader2 className="h-5 w-5 animate-spin text-white" aria-hidden />
+                        </div>
+                      </div>
+                    ) : null}
+                    {images.length + (pendingUploadPreview ? 1 : 0) < MAX_IMAGES ? (
                       <label
                         htmlFor={fileInputId}
                         className={[
                           "flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-gray-300 bg-gray-50 text-xs font-semibold text-gray-500",
-                          formLocked || images.length >= MAX_IMAGES || imageUploading ? "pointer-events-none opacity-50" : "",
+                          formLocked ||
+                          images.length + (pendingUploadPreview ? 1 : 0) >= MAX_IMAGES ||
+                          imageUploading
+                            ? "pointer-events-none opacity-50"
+                            : "",
                         ].join(" ")}
                       >
                         {imageUploading ? (
