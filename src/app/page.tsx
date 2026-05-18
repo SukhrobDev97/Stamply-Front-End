@@ -15,6 +15,7 @@ import { t, type ProfileLang } from "@/app/profile/copy";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
 import { useAppLang } from "@/lib/use-app-lang";
 import { openStamplySupportTelegram } from "@/lib/support-telegram";
+import { HomeAnalyticsCard } from "@/components/home/home-analytics-card";
 import { HomeWorkspaceOverlay } from "@/components/home/home-workspace-overlay";
 import { TrialWarningModalLazy } from "@/components/home/trial-warning-modal-lazy";
 import { getTrialWarningState } from "@/lib/trial/get-trial-warning-state";
@@ -32,14 +33,10 @@ import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import {
   Activity,
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   Clock,
   Loader2,
-  Minus,
   Shield,
-  TrendingUp,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -142,17 +139,6 @@ function stripCustomerPrefix(title: string) {
     .replace(/^[:\-–—>]+/, "")
     .replace(/^\s*(?:→|:|-|–|—)\s*/, "")
     .trim();
-}
-
-function formatVisitDeltaPercent(pct: number | null | undefined): string {
-  if (pct == null || !Number.isFinite(pct)) return "0%";
-  const r = Math.round(pct * 100) / 100;
-  if (r === 0 || Object.is(r, -0)) return "0%";
-  return `${r > 0 ? "+" : ""}${r}%`;
-}
-
-function visitTrendDir(stats: OwnerDashboardStatsData | undefined): string {
-  return String(stats?.trendDirection ?? "neutral").toLowerCase();
 }
 
 function translateActivityDescription(raw: string, txt: (typeof t)[ProfileLang]): string {
@@ -274,7 +260,6 @@ function OwnerHome() {
   const [successId, setSuccessId] = useState<number | null>(null);
 
   const stats = data?.ownerDashboardStats;
-  const visitDir = visitTrendDir(stats);
   const pendingVisits = (stats?.pendingVisits ?? []).filter((v) => !approvedIds.includes(v.id));
   // Prefer list length so the card matches what the modal shows.
   // (Backend `pendingCount` can lag behind `pendingVisits` in some responses.)
@@ -618,12 +603,12 @@ function OwnerHome() {
                 type="button"
                 ref={workspaceBtnRef}
                 onClick={() => setWorkspaceOpen((v) => !v)}
-                className="inline-flex items-center gap-1.5 text-lg font-semibold text-[#0F172A] leading-tight active:scale-[0.99]"
+                className="inline-flex items-center gap-1.5 text-xl font-semibold text-[#0F172A] leading-tight active:scale-[0.99]"
               >
                 <span className="max-w-[220px] truncate">{businessName || "\u00A0"}</span>
                 <ChevronDown className="h-4 w-4 text-gray-400" aria-hidden />
               </button>
-              <div className="text-xs text-gray-400">{businessType || "\u00A0"}</div>
+              <div className="text-sm text-gray-400">{businessType || "\u00A0"}</div>
             </div>
           </div>
 
@@ -645,10 +630,10 @@ function OwnerHome() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[14px] font-semibold tracking-[-0.01em] text-gray-900">
+                <div className="text-[15px] font-semibold tracking-[-0.01em] text-gray-900">
                   {txt.homePending}
                 </div>
-                <div className="mt-1 text-[12px] font-medium text-gray-400">
+                <div className="mt-1 text-[13px] font-medium text-gray-400">
                   {txt.homePendingSubtitle}
                 </div>
               </div>
@@ -681,7 +666,7 @@ function OwnerHome() {
               )}
             </div>
 
-            <div className="mt-3 text-[40px] font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[#D97706]">
+            <div className="mt-3 text-[44px] font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[#D97706]">
               {pendingCount}
             </div>
           </button>
@@ -696,10 +681,10 @@ function OwnerHome() {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[14px] font-semibold tracking-[-0.01em] text-gray-900">
+                <div className="text-[15px] font-semibold tracking-[-0.01em] text-gray-900">
                   {txt.homeCustomers}
                 </div>
-                <div className="mt-1 text-[12px] font-medium text-gray-400">
+                <div className="mt-1 text-[13px] font-medium text-gray-400">
                   {txt.homeCustomersSubtitle}
                 </div>
               </div>
@@ -708,90 +693,13 @@ function OwnerHome() {
               </span>
             </div>
 
-            <div className="mt-3 text-[40px] font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[#2563EB]">
+            <div className="mt-3 text-[44px] font-extrabold leading-none tracking-[-0.03em] tabular-nums text-[#2563EB]">
               {Number(stats?.totalCustomers ?? 0)}
             </div>
           </Link>
         </div>
 
-        <Link
-          key={`visits-today-${lang}`}
-          href="/visits"
-          className={[
-            "group relative flex h-[190px] w-full overflow-hidden rounded-[28px] p-5 text-left text-white",
-            "active:scale-[0.98] transition-all duration-300 ease-out hover:scale-[1.01]",
-            "bg-[linear-gradient(135deg,#A98CFF_0%,#8F7CFF_40%,#7B8DFF_100%)]",
-            "shadow-[0_18px_45px_rgba(126,116,255,0.26),0_6px_18px_rgba(126,116,255,0.14)]",
-          ].join(" ")}
-        >
-          <span className="pointer-events-none absolute -left-8 -top-10 h-36 w-36 animate-pulse rounded-full bg-white/25 blur-3xl" />
-          <span className="pointer-events-none absolute bottom-0 right-6 h-32 w-32 rounded-full bg-[#C9B9FF]/30 blur-3xl transition-transform duration-700 group-hover:translate-y-[-8px]" />
-          <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_22%,rgba(255,255,255,0.34),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0))]" />
-
-          <div className="relative z-10 flex min-w-0 flex-1 flex-col justify-center">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/22 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.34)] backdrop-blur-md">
-              <TrendingUp size={20} strokeWidth={2.45} />
-            </span>
-            <span key={`label-${lang}`} className="mt-4 text-[14px] font-semibold tracking-wide text-white/80">
-              {txt.homeVisitsToday}
-            </span>
-            <span className="mt-1 text-[58px] font-extrabold leading-none tracking-[-0.055em] text-white tabular-nums">
-              {Number(stats?.todayVisits ?? stats?.visitsToday ?? 0)}
-            </span>
-            <span className="mt-3 inline-flex w-fit items-center gap-2 rounded-full bg-white/18 px-3 py-1.5 text-[12px] font-semibold text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] backdrop-blur-md">
-              <span className="flex shrink-0 items-center text-white">
-                {visitDir === "down" ? (
-                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
-                ) : visitDir === "up" ? (
-                  <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
-                ) : (
-                  <Minus className="h-3.5 w-3.5" strokeWidth={2.6} aria-hidden />
-                )}
-              </span>
-              <span className="text-[13px] font-extrabold tabular-nums text-white">
-                {formatVisitDeltaPercent(stats?.percentChange)}
-              </span>
-              <span className="h-1 w-1 shrink-0 rounded-full bg-white/55" />
-              <span key={`vs-${lang}`} className="leading-none">
-                {txt.homeVsYesterday}
-              </span>
-            </span>
-          </div>
-
-          <div className="relative z-10 ml-3 flex w-[43%] min-w-[136px] items-center">
-            <div className="relative h-[128px] w-full rounded-[24px] bg-white/10 px-2.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] backdrop-blur-sm">
-              <div className="absolute inset-y-4 left-4 w-px bg-white/12" />
-              <div className="absolute inset-y-4 left-[36%] w-px bg-white/12" />
-              <div className="absolute inset-y-4 left-[66%] w-px bg-white/12" />
-              <div className="absolute inset-y-4 right-4 w-px bg-white/12" />
-              <svg className="absolute inset-x-1 bottom-2 h-[88px] w-[calc(100%-8px)] overflow-visible" viewBox="0 0 150 90" fill="none" aria-hidden="true">
-                <path
-                  d="M5 70 C32 42 47 66 72 46 C96 27 116 40 145 19"
-                  stroke="rgba(255,255,255,0.22)"
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                  className="animate-pulse blur-sm"
-                />
-                <path
-                  d="M5 70 C32 42 47 66 72 46 C96 27 116 40 145 19"
-                  stroke="rgba(255,255,255,0.86)"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
-                {[5, 72, 145].map((x, i) => (
-                  <circle
-                    key={x}
-                    cx={x}
-                    cy={[70, 46, 19][i]}
-                    r="3.2"
-                    fill="rgba(255,255,255,0.95)"
-                    className="drop-shadow-[0_0_8px_rgba(255,255,255,0.75)]"
-                  />
-                ))}
-              </svg>
-            </div>
-          </div>
-        </Link>
+        <HomeAnalyticsCard active={dashboardQueryActive} txt={txt} lang={lang} />
 
         <div className="flex w-full flex-col">
           {/* Recent Activity — full-width compact feed */}
@@ -808,7 +716,7 @@ function OwnerHome() {
             <span className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#CBB8FF]/35 blur-3xl" />
 
             <div className="relative z-10 mb-2.5 flex items-center justify-between gap-2">
-              <h2 className="min-w-0 truncate text-[14px] font-bold tracking-[-0.02em] text-gray-950">
+              <h2 className="min-w-0 truncate text-[15px] font-bold tracking-[-0.02em] text-gray-950">
                 {txt.homeRecentActivity}
               </h2>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEE6FF]/85 text-[#7665D8]">
@@ -819,7 +727,7 @@ function OwnerHome() {
             <div className="relative z-10">
               <div className="space-y-1.5">
                 {recentActivity.length === 0 ? (
-                  <div className="rounded-2xl bg-white/60 px-3 py-2 text-sm font-medium text-gray-500">
+                  <div className="rounded-2xl bg-white/60 px-3 py-2 text-[15px] font-medium text-gray-500">
                     {txt.homeNoActivity}
                   </div>
                 ) : (
@@ -833,26 +741,26 @@ function OwnerHome() {
                         className="flex items-center gap-2.5 rounded-2xl bg-white/70 px-2.5 py-1.5 shadow-[0_4px_12px_rgba(118,101,216,0.07),inset_0_1px_0_rgba(255,255,255,0.75)]"
                         style={idx === 2 ? { opacity: 0.5 } : undefined}
                       >
-                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#B99BFF_0%,#7F79FF_100%)] text-[11px] font-extrabold text-white">
+                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#B99BFF_0%,#7F79FF_100%)] text-xs font-extrabold text-white">
                           {getFirstLetter(initialsSource)}
                         </div>
                         <div className="min-w-0 flex-1">
                           {parts.name ? (
                             <>
-                              <p className="truncate text-[13px] font-semibold leading-tight text-gray-900">
+                              <p className="truncate text-[14px] font-semibold leading-tight text-gray-900">
                                 {parts.name}
                               </p>
-                              <p className="truncate text-[11.5px] font-medium leading-tight text-gray-400">
+                              <p className="truncate text-[13px] font-medium leading-tight text-gray-400">
                                 {parts.action}
                               </p>
                             </>
                           ) : (
-                            <p className="truncate text-[13px] font-semibold leading-tight text-gray-900">
+                            <p className="truncate text-[14px] font-semibold leading-tight text-gray-900">
                               {parts.action}
                             </p>
                           )}
                         </div>
-                        <span className="flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[#EDE8F7]/95 px-2 py-0.5 text-[9.5px] font-semibold tabular-nums text-gray-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+                        <span className="flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[#EDE8F7]/95 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-gray-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
                           {item?.createdAt ? formatTime(item.createdAt) : ""}
                         </span>
                       </div>
@@ -911,11 +819,11 @@ function OwnerHome() {
             ].join(" ")}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-black">{txt.homePendingRequests}</div>
+              <div className="text-base font-semibold text-black">{txt.homePendingRequests}</div>
               <button
                 type="button"
                 onClick={() => pendingModal.close()}
-                className="text-xs font-semibold text-gray-500 hover:text-black"
+                className="text-sm font-semibold text-gray-500 hover:text-black"
               >
                 {txt.homeClose}
               </button>
@@ -923,7 +831,7 @@ function OwnerHome() {
 
             <div className="mt-4 space-y-2">
               {pendingVisits.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-[15px] text-gray-500">
                   {txt.homeNoPending}
                 </div>
               ) : (
@@ -934,10 +842,10 @@ function OwnerHome() {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold text-gray-900">
+                        <div className="truncate text-[17px] font-semibold text-gray-900">
                           {v.customerName || txt.userFallback}
                         </div>
-                        <div className="mt-1 text-xs text-gray-500">
+                        <div className="mt-1 text-sm text-gray-500">
                           {v.visitTime ? formatTime(v.visitTime) : ""}
                         </div>
                       </div>
@@ -946,7 +854,7 @@ function OwnerHome() {
                         disabled={loadingId === v.id}
                         onClick={() => void onApprove(v.id)}
                         className={[
-                          "shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition-colors duration-200",
+                          "shrink-0 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-colors duration-200",
                           successId === v.id
                             ? "bg-emerald-600 text-white"
                             : "bg-[#0284C7] text-white disabled:opacity-70",
@@ -985,11 +893,11 @@ function OwnerHome() {
             ].join(" ")}
           >
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold text-black">{txt.homeRecentActivity}</div>
+              <div className="text-base font-semibold text-black">{txt.homeRecentActivity}</div>
               <button
                 type="button"
                 onClick={() => activityModal.close()}
-                className="text-xs font-semibold text-gray-500 hover:text-black"
+                className="text-sm font-semibold text-gray-500 hover:text-black"
               >
                 {txt.homeClose}
               </button>
@@ -997,7 +905,7 @@ function OwnerHome() {
 
                 <div className="mt-4 max-h-[min(70vh,520px)] space-y-2 overflow-y-auto overscroll-contain pr-1">
               {recentActivity.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-[15px] text-gray-500">
                   {txt.homeNoActivity}
                 </div>
               ) : (
@@ -1016,14 +924,14 @@ function OwnerHome() {
                       <div className="min-w-0 flex-1">
                         {parts.name ? (
                           <>
-                            <p className="truncate text-sm font-semibold text-gray-900">{parts.name}</p>
-                            <p className="truncate text-xs text-gray-500">{parts.action}</p>
+                            <p className="truncate text-[15px] font-semibold text-gray-900">{parts.name}</p>
+                            <p className="truncate text-sm text-gray-500">{parts.action}</p>
                           </>
                         ) : (
-                          <p className="truncate text-sm font-semibold text-gray-900">{parts.action}</p>
+                          <p className="truncate text-[15px] font-semibold text-gray-900">{parts.action}</p>
                         )}
                       </div>
-                      <div className="shrink-0 text-xs text-gray-400">
+                      <div className="shrink-0 text-sm text-gray-400">
                         {item?.createdAt ? formatTime(item.createdAt) : ""}
                       </div>
                     </div>

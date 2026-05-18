@@ -13,6 +13,26 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const PROJECT_ROOT = process.cwd();
 const UPLOADS_DIR = path.join(PROJECT_ROOT, "public", "uploads", "broadcasts");
 
+/** TEMPORARY — remove after Telegram /upload 502 is diagnosed. */
+const UPLOAD_DEBUG = true;
+
+function uploadDebug(step: string, extra: Record<string, unknown> = {}) {
+  const payload = { step, ...extra, at: new Date().toISOString() };
+  if (UPLOAD_DEBUG) console.error("[upload debug]", payload);
+  return payload;
+}
+
+function jsonWithDebug(
+  body: Record<string, unknown>,
+  status: number,
+  debug: Record<string, unknown>,
+) {
+  return NextResponse.json(
+    UPLOAD_DEBUG ? { ...body, _debug: debug } : body,
+    { status },
+  );
+}
+
 function readUploadProxyUrl(): string | undefined {
   try {
     const { combinedEnv } = loadEnvConfig(
@@ -148,47 +168,120 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const proxy = readUploadProxyUrl();
+  const selfProxy = isSelfProxy(proxy, req.url);
+  const publicAppUrlEnv = readPublicAppUrl();
+  const publicAppUrlResolved = resolvePublicAppUrl(req);
+  const requestOrigin = requestPublicOrigin(req);
+
+  uploadDebug("post_start", {
+    reqUrl: req.url,
+    proxy: proxy ?? "(empty)",
+    selfProxy,
+    branch: selfProxy ? "local_public_uploads" : "proxy_upstream",
+    NODE_ENV: process.env.NODE_ENV,
+    PUBLIC_APP_URL_env: publicAppUrlEnv ?? "(unset)",
+    publicAppUrlResolved: publicAppUrlResolved ?? "(null)",
+    requestOrigin: requestOrigin ?? "(null)",
+    uploadsDir: UPLOADS_DIR,
+  });
 
   let formData: FormData;
   try {
     formData = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "bad_request" }, { status: 400 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonWithDebug(
+      { error: "bad_request", detail: message },
+      400,
+      uploadDebug("formData_parse_failed", { message }),
+    );
   }
 
   const file = formData.get("file");
   if (!(file instanceof File)) {
-    return NextResponse.json({ error: "no_file" }, { status: 400 });
-  }
-  if (!isLikelyImage(file)) {
-    return NextResponse.json({ error: "not_image" }, { status: 400 });
-  }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "too_large" }, { status: 400 });
+    return jsonWithDebug(
+      { error: "no_file", detail: `form field type: ${typeof file}` },
+      400,
+      uploadDebug("no_file", { keys: [...formData.keys()] }),
+    );
   }
 
-  if (isSelfProxy(proxy, req.url)) {
+  uploadDebug("file_received", {
+    name: file.name,
+    type: file.type || "(empty)",
+    size: file.size,
+    isLikelyImage: isLikelyImage(file),
+  });
+
+  if (!isLikelyImage(file)) {
+    return jsonWithDebug(
+      { error: "not_image" },
+      400,
+      uploadDebug("not_image", { name: file.name, type: file.type }),
+    );
+  }
+  if (file.size > MAX_BYTES) {
+    return jsonWithDebug(
+      { error: "too_large" },
+      400,
+      uploadDebug("too_large", { size: file.size, max: MAX_BYTES }),
+    );
+  }
+
+  if (selfProxy) {
+    uploadDebug("local_branch_enter", { uploadsDir: UPLOADS_DIR });
     try {
-      const localUrl = publicLocalUploadUrl(await saveLocal(file), req);
+      const relativePath = await saveLocal(file);
+      uploadDebug("local_save_ok", { relativePath });
+
+      const localUrl = publicLocalUploadUrl(relativePath, req);
+      uploadDebug("local_public_url", {
+        relativePath,
+        localUrl: localUrl ?? "(null)",
+        publicAppUrlResolved: publicAppUrlResolved ?? "(null)",
+      });
+
       if (!localUrl) {
-        return NextResponse.json(
+        return jsonWithDebug(
           {
             error: "not_configured",
             detail:
               "Set PUBLIC_APP_URL to your HTTPS app URL (e.g. ngrok), or UPLOAD_PROXY_URL to external storage. UPLOAD_PROXY_URL can stay empty for local public/uploads.",
           },
-          { status: 503 },
+          503,
+          uploadDebug("local_url_null", {
+            relativePath,
+            publicAppUrlEnv: publicAppUrlEnv ?? "(unset)",
+            requestOrigin: requestOrigin ?? "(null)",
+          }),
         );
       }
-      return NextResponse.json({ url: localUrl });
-    } catch {
-      return NextResponse.json({ error: "upload_failed" }, { status: 502 });
+
+      return jsonWithDebug(
+        { url: localUrl },
+        200,
+        uploadDebug("local_success", { url: localUrl, relativePath }),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack : undefined;
+      return jsonWithDebug(
+        { error: "upload_failed", detail: message },
+        502,
+        uploadDebug("local_save_failed", { message, stack }),
+      );
     }
   }
 
   if (!proxy) {
-    return NextResponse.json({ error: "not_configured" }, { status: 503 });
+    return jsonWithDebug(
+      { error: "not_configured" },
+      503,
+      uploadDebug("proxy_missing", { selfProxy: false }),
+    );
   }
+
+  uploadDebug("proxy_branch_enter", { proxyTarget: proxy });
 
   const upstream = new FormData();
   upstream.append("file", file);
@@ -201,33 +294,77 @@ export async function POST(req: Request) {
   let res: Response;
   try {
     res = await fetch(proxy, { method: "POST", body: upstream, headers });
-  } catch {
-    return NextResponse.json({ error: "upload_failed" }, { status: 502 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonWithDebug(
+      { error: "upload_failed", detail: message },
+      502,
+      uploadDebug("proxy_fetch_failed", { proxyTarget: proxy, message }),
+    );
   }
 
   let body: Record<string, unknown>;
+  let rawText = "";
   try {
-    body = (await res.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "upload_failed" }, { status: 502 });
+    rawText = await res.text();
+    body = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return jsonWithDebug(
+      { error: "upload_failed", detail: message },
+      502,
+      uploadDebug("proxy_json_parse_failed", {
+        proxyTarget: proxy,
+        upstreamStatus: res.status,
+        rawTextPreview: rawText.slice(0, 500),
+        message,
+      }),
+    );
   }
 
+  uploadDebug("proxy_upstream_response", {
+    proxyTarget: proxy,
+    upstreamStatus: res.status,
+    body,
+    rawTextPreview: rawText.slice(0, 500),
+  });
+
   if (!res.ok) {
-    // Never forward upstream 5xx as 503 with arbitrary `error` — client maps 503+`not_configured`
-    // to “set UPLOAD_PROXY_URL”, but that string may come from the storage API, not this app.
     const upstreamStatus = res.status;
     const status =
       upstreamStatus >= 400 && upstreamStatus < 500 ? upstreamStatus : 502;
     const rawErr = typeof body.error === "string" ? body.error.trim() : "";
     const detail =
       rawErr && rawErr !== "not_configured" ? rawErr : undefined;
-    return NextResponse.json({ error: "upload_failed", detail }, { status });
+    return jsonWithDebug(
+      { error: "upload_failed", detail },
+      status,
+      uploadDebug("proxy_upstream_not_ok", {
+        proxyTarget: proxy,
+        upstreamStatus,
+        body,
+      }),
+    );
   }
 
   const url = extractPublicUrl(body);
-  if (!url || !isDeployReachableUrl(url)) {
-    return NextResponse.json({ error: "bad_url" }, { status: 502 });
+  const reachable = url ? isDeployReachableUrl(url) : false;
+  if (!url || !reachable) {
+    return jsonWithDebug(
+      { error: "bad_url", detail: url ?? "(extract failed)" },
+      502,
+      uploadDebug("proxy_bad_url", {
+        proxyTarget: proxy,
+        extractedUrl: url ?? "(null)",
+        reachable,
+        body,
+      }),
+    );
   }
 
-  return NextResponse.json({ url });
+  return jsonWithDebug(
+    { url },
+    200,
+    uploadDebug("proxy_success", { url, proxyTarget: proxy }),
+  );
 }
