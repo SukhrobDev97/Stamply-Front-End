@@ -33,7 +33,7 @@ export function useOverlayModal() {
   ].join(" ");
 
   const panelClassName = "transition-all duration-200";
-  const panelOpenClassName = panelOpen ? "scale-100 opacity-100" : "scale-95 opacity-0";
+  const panelOpenClassName = panelOpen ? "scale-100" : "scale-95 opacity-0";
 
   return { show, open, close, onOverlayTransitionEnd, overlayClassName, panelClassName, panelOpenClassName };
 }

@@ -1,27 +1,14 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { LoadMoreButton } from "@/components/common/load-more-button";
 import { RequireAuth } from "@/components/common/require-auth";
-import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
-import { useQuery } from "@apollo/client/react";
+import { useCustomersPage } from "@/hooks/use-customers-page";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useAuth } from "@/app/providers";
 import { useAppLang } from "@/lib/use-app-lang";
-
-type Customer = {
-  id: number;
-  name: string;
-  phone: string;
-  totalVisits: number;
-  stampCount: number;
-};
-
-type MyCustomersQueryData = {
-  myCustomers: Customer[];
-};
 
 function ArrowIcon({ className }: { className: string }) {
   return (
@@ -50,28 +37,27 @@ export default function CustomersPage() {
   const router = useRouter();
   const { txt } = useAppLang();
   const [q, setQ] = useState("");
-  const { ready, isAuthenticated } = useAuth();
-  const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
-    fetchPolicy: "cache-and-network",
-    nextFetchPolicy: "cache-first",
-    notifyOnNetworkStatusChange: true,
-    skip: !ready || !isAuthenticated,
-  });
+  const {
+    items,
+    loading,
+    loadingMore,
+    error,
+    hasMore,
+    loadMore,
+    totalLabel,
+  } = useCustomersPage();
 
   const filtered = useMemo(() => {
-    if (error && !data) return [];
-    const customers = data?.myCustomers ?? [];
+    if (error && items.length === 0) return [];
     const s = q.trim().toLowerCase();
-    if (!s) return customers;
-    return customers.filter((c) => {
+    if (!s) return items;
+    return items.filter((c) => {
       return (
         String(c.name ?? "").toLowerCase().includes(s) ||
         String(c.phone ?? "").toLowerCase().includes(s)
       );
     });
-  }, [data, error, q]);
-
-  const customers = data?.myCustomers ?? [];
+  }, [items, error, q]);
 
   return (
     <RequireAuth>
@@ -89,11 +75,11 @@ export default function CustomersPage() {
             <h1 className="text-xl font-semibold text-[#0F172A]">{txt.homeCustomers}</h1>
           </div>
 
-          {loading && !data ? (
+          {loading ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.homeLoading}
             </div>
-          ) : error && !data ? (
+          ) : error && items.length === 0 ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.customersFailed}
             </div>
@@ -107,13 +93,8 @@ export default function CustomersPage() {
               />
 
               <div className="mt-3 text-xs text-gray-400">
-                {txt.customersTotalLabel}: {customers.length}
+                {txt.customersTotalLabel}: {totalLabel}
               </div>
-              {loading ? (
-                <div className="mt-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
-                  {txt.homeLoading}
-                </div>
-              ) : null}
 
               <div className="mt-4 space-y-2">
                 {filtered.length === 0 ? (
@@ -140,6 +121,14 @@ export default function CustomersPage() {
                   ))
                 )}
               </div>
+
+              <LoadMoreButton
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                loadMoreLabel={txt.loadMore}
+                loadingMoreLabel={txt.loadingMore}
+                onLoadMore={loadMore}
+              />
             </>
           )}
         </div>

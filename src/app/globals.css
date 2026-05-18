@@ -22,3 +22,10 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Telegram / iOS WebView: inputs smaller than 16px trigger focus zoom */
+input,
+textarea,
+select {
+  font-size: 16px;
+}

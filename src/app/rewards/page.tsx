@@ -2,11 +2,13 @@
 
 import { BottomNav } from "@/components/common/bottom-nav";
 import { RequireAuth } from "@/components/common/require-auth";
+import { LoadMoreButton } from "@/components/common/load-more-button";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
-import { LIST_MY_REWARDS_QUERY } from "@/graphql/queries/list-my-rewards.query";
+import { REWARDS_PAGE_QUERY } from "@/graphql/queries/rewardsPage.query";
 import { useAuth } from "@/app/providers";
+import { useCursorPage } from "@/hooks/use-cursor-page";
 import { useAppLang } from "@/lib/use-app-lang";
-import { useMutation, useQuery } from "@apollo/client/react";
+import { useMutation } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
@@ -18,10 +20,6 @@ type RewardRow = {
   status: string;
   issuedAt?: string | null;
   redeemedAt?: string | null;
-};
-
-type ListMyRewardsQueryData = {
-  listMyRewards: RewardRow[];
 };
 
 function isUnlocked(status: string) {
@@ -62,10 +60,17 @@ function RewardsPageInner() {
   const router = useRouter();
   const { txt } = useAppLang();
   const { ready, isAuthenticated } = useAuth();
-  const { data, loading, error } = useQuery<ListMyRewardsQueryData>(LIST_MY_REWARDS_QUERY, {
-    fetchPolicy: "cache-and-network",
-    nextFetchPolicy: "cache-first",
-    notifyOnNetworkStatusChange: true,
+  const {
+    items: pageItems,
+    loading,
+    loadingMore,
+    error,
+    hasMore,
+    loadMore,
+    refetchFirstPage,
+  } = useCursorPage<RewardRow>({
+    query: REWARDS_PAGE_QUERY,
+    fieldName: "rewardsPage",
     skip: !ready || !isAuthenticated,
   });
   const [redeemReward, { loading: redeeming }] = useMutation<
@@ -75,7 +80,7 @@ function RewardsPageInner() {
   const [redeemedIds, setRedeemedIds] = useState<Record<number, string>>({});
 
   const rows = useMemo(() => {
-    const next = (data?.listMyRewards ?? []).map((row) => {
+    const next = pageItems.map((row) => {
       const redeemedAt = redeemedIds[row.id];
       return redeemedAt ? { ...row, status: "REDEEMED", redeemedAt } : row;
     });
@@ -89,7 +94,7 @@ function RewardsPageInner() {
       return tb - ta;
     });
     return next;
-  }, [data?.listMyRewards, redeemedIds]);
+  }, [pageItems, redeemedIds]);
 
   const unlockedCount = rows.filter((r) => isUnlocked(r.status)).length;
 
@@ -99,6 +104,7 @@ function RewardsPageInner() {
       if (res.data?.redeemReward !== true) return;
       const now = new Date().toISOString();
       setRedeemedIds((prev) => ({ ...prev, [rewardId]: now }));
+      void refetchFirstPage();
     } catch {
       // keep simple (no new toasts)
     }
@@ -120,12 +126,6 @@ function RewardsPageInner() {
         </div>
 
         <div className="mt-4 space-y-2">
-          {loading && rows.length > 0 ? (
-            <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700">
-              {txt.homeLoading}
-            </div>
-          ) : null}
-
           {loading && rows.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.homeLoading}
@@ -181,6 +181,14 @@ function RewardsPageInner() {
               );
             })
           )}
+
+          <LoadMoreButton
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            loadMoreLabel={txt.loadMore}
+            loadingMoreLabel={txt.loadingMore}
+            onLoadMore={loadMore}
+          />
         </div>
 
         <div className="mt-3 text-xs text-gray-400">

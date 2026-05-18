@@ -9,6 +9,9 @@ import {
 } from "@/lib/api";
 import { stamplyDebugLog } from "@/lib/stamply-debug-log";
 
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const COMPRESS_THRESHOLD_BYTES = 1.5 * 1024 * 1024;
+
 const LEGACY_UPLOAD_CODE: Record<string, string> = {
   not_configured: "NOT_CONFIGURED",
   upload_failed: "UPLOAD_FAILED",
@@ -53,17 +56,33 @@ function pickUrlFromJson(j: Record<string, unknown>): string | null {
   return null;
 }
 
-const compressionOptions = {
-  maxSizeMB: 1,
-  maxWidthOrHeight: 1280,
-  useWebWorker: false,
-};
+function compressionOptions(useWebWorker: boolean) {
+  return {
+    maxSizeMB: 2,
+    maxWidthOrHeight: 1280,
+    useWebWorker,
+  };
+}
 
 function toUploadableFile(blob: Blob, originalName: string): File {
   if (blob instanceof File) return blob;
   const base = originalName.replace(/\.[^.]+$/, "") || "image";
   const ext = blob.type.includes("png") ? ".png" : ".jpg";
   return new File([blob], `${base}${ext}`, { type: blob.type || "image/jpeg" });
+}
+
+async function compressForUpload(file: File): Promise<File> {
+  if (file.size <= COMPRESS_THRESHOLD_BYTES) {
+    return file;
+  }
+  try {
+    const out = await imageCompression(file, compressionOptions(true));
+    return toUploadableFile(out, file.name);
+  } catch (e) {
+    stamplyDebugLog("upload", "compress worker failed, retry main thread", String(e));
+    const out = await imageCompression(file, compressionOptions(false));
+    return toUploadableFile(out, file.name);
+  }
 }
 
 async function postUploadOnce(file: File, headers: HeadersInit): Promise<Response> {
@@ -92,10 +111,17 @@ export async function uploadBroadcastImage(file: File, attempt = 0): Promise<str
     });
   }
 
-  let compressed: File;
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new UploadBroadcastImageError({
+      code: "VALIDATION_FAILED",
+      message: "too_large",
+      retryable: false,
+    });
+  }
+
+  let uploadFile: File;
   try {
-    const out = await imageCompression(file, compressionOptions);
-    compressed = toUploadableFile(out, file.name);
+    uploadFile = await compressForUpload(file);
   } catch (e) {
     stamplyDebugLog("upload", "compress failed", String(e));
     throw new UploadBroadcastImageError({
@@ -111,7 +137,7 @@ export async function uploadBroadcastImage(file: File, attempt = 0): Promise<str
 
   let res: Response;
   try {
-    res = await postUploadOnce(compressed, headers);
+    res = await postUploadOnce(uploadFile, headers);
   } catch (e) {
     if (e instanceof FetchTimeoutError) {
       const api: ApiError = { code: "NETWORK_ERROR", message: "timeout", retryable: true };

@@ -8,7 +8,7 @@ import path from "path";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BYTES = 2 * 1024 * 1024;
+const MAX_BYTES = 5 * 1024 * 1024;
 
 const PROJECT_ROOT = process.cwd();
 const UPLOADS_DIR = path.join(PROJECT_ROOT, "public", "uploads", "broadcasts");

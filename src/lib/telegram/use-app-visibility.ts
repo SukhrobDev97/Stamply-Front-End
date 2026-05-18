@@ -1,5 +1,7 @@
 "use client";
 
+import { resumeStamplyQueries } from "@/lib/telegram/resume-refetch";
+import { getTelegramWebApp } from "@/lib/telegram/webapp";
 import { useApolloClient } from "@apollo/client/react";
 import { useEffect, useRef } from "react";
 
@@ -11,6 +13,12 @@ export function useTelegramVisibilityRefetch(enabled = true) {
   useEffect(() => {
     if (!enabled || typeof document === "undefined") return;
 
+    const resume = () => {
+      window.setTimeout(() => {
+        void resumeStamplyQueries(client);
+      }, 400);
+    };
+
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         wasHiddenRef.current = true;
@@ -19,7 +27,7 @@ export function useTelegramVisibilityRefetch(enabled = true) {
       if (document.visibilityState !== "visible") return;
       if (!wasHiddenRef.current) return;
       wasHiddenRef.current = false;
-      void client.reFetchObservableQueries(true);
+      resume();
     };
 
     if (document.visibilityState === "hidden") {
@@ -27,6 +35,17 @@ export function useTelegramVisibilityRefetch(enabled = true) {
     }
 
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+
+    const webApp = getTelegramWebApp();
+    const onTelegramResume = () => {
+      if (document.visibilityState === "hidden") return;
+      resume();
+    };
+    webApp?.onEvent?.("viewportChanged", onTelegramResume);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      webApp?.offEvent?.("viewportChanged", onTelegramResume);
+    };
   }, [client, enabled]);
 }

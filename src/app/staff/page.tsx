@@ -5,6 +5,7 @@ import { CREATE_VISIT_MUTATION } from "@/graphql/mutations/createVisit.mutation"
 import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { getTelegramWebApp } from "@/lib/telegram/webapp";
 import { useAuth } from "@/app/providers";
+import { userMessageFromUnknown } from "@/lib/api";
 import { useCallback, useMemo, useState } from "react";
 
 type ScanState =
@@ -69,15 +70,14 @@ export default function StaffPage() {
       createVisit({
         variables: { input: { customerId } },
         refetchQueries: [{ query: OWNER_DASHBOARD }],
-        awaitRefetchQueries: true,
       })
         .then(() => {
           setScanState({ status: "success", message: "Stamp added" });
         })
-        .catch((err: any) => {
+        .catch((err: unknown) => {
           setScanState({
             status: "error",
-            message: err?.message ?? "Failed to create visit",
+            message: userMessageFromUnknown(err),
           });
         });
 

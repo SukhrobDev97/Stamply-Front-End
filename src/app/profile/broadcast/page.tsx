@@ -5,15 +5,17 @@ import { RequireAuth } from "@/components/common/require-auth";
 import { useAuth } from "@/app/providers";
 import { CREATE_BROADCAST_MUTATION } from "@/graphql/mutations/createBroadcast.mutation";
 import { DELETE_BROADCAST_MUTATION } from "@/graphql/mutations/deleteBroadcast.mutation";
-import { BROADCASTS_QUERY } from "@/graphql/queries/broadcasts.query";
+import { BROADCASTS_PAGE_QUERY } from "@/graphql/queries/broadcastsPage.query";
+import { LoadMoreButton } from "@/components/common/load-more-button";
+import { useCursorPage } from "@/hooks/use-cursor-page";
 import { GET_BROADCAST_QUERY } from "@/graphql/queries/getBroadcast.query";
-import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { useProfile } from "@/components/common/require-auth";
 import { useAppLang } from "@/lib/use-app-lang";
 import { isLikelyImage } from "@/lib/is-likely-image";
 import { stamplyDebugLog } from "@/lib/stamply-debug-log";
 import { getPrimaryErrorCode, mapApiErrorToUserMessage, normalizeApiError } from "@/lib/api";
 import { UploadBroadcastImageError, uploadBroadcastImage } from "@/lib/upload-broadcast-image";
-import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
+import { useApolloClient, useMutation } from "@apollo/client/react";
 import { ArrowLeft, ImagePlus, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,15 +24,11 @@ import { useEffect, useId, useRef, useState } from "react";
 
 const MAX_MSG = 300;
 const MAX_IMAGES = 2;
-const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
-const POLL_MS = 2500;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const POLL_MS = 4000;
 const MAX_POLL_TICKS = 120;
 
 type BroadcastType = "ANNOUNCEMENT" | "DISCOUNT";
-
-type ProfileForBroadcast = {
-  profile: { role?: string | null; business?: { name?: string | null } | null } | null;
-};
 
 type CreateBroadcastData = {
   createBroadcast: { id: number | string; status: string };
@@ -47,10 +45,6 @@ type BroadcastHistoryRow = {
   createdAt: string;
   status: string;
   sentCount?: number | null;
-};
-
-type BroadcastsQueryData = {
-  broadcasts: BroadcastHistoryRow[] | null;
 };
 
 type DeleteBroadcastData = {
@@ -101,17 +95,14 @@ function historyTypeLabel(type: string, txt: (typeof t)[ProfileLang]): string {
   return txt.broadcastTypeAnnouncement;
 }
 
-export default function BroadcastPage() {
+function BroadcastPageInner() {
   const router = useRouter();
   const { lang, txt } = useAppLang();
   const client = useApolloClient();
   const { ready, isAuthenticated } = useAuth();
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
 
-  const { data: profileData, loading: profileLoading } = useQuery<ProfileForBroadcast>(PROFILE_QUERY, {
-    skip: !ready || !isAuthenticated || !token,
-    fetchPolicy: "cache-first",
-  });
+  const { profileData, loading: profileLoading } = useProfile();
 
   const roleRaw = profileData?.profile?.role;
   const role = typeof roleRaw === "string" ? roleRaw.toLowerCase() : "";
@@ -156,20 +147,22 @@ export default function BroadcastPage() {
 
   const historySkip = !ready || !isAuthenticated || !token || profileLoading || !canAccess;
   const {
-    data: broadcastsData,
+    items: historyItems,
     loading: historyLoading,
+    loadingMore: historyLoadingMore,
     error: historyError,
-  } = useQuery<BroadcastsQueryData>(BROADCASTS_QUERY, {
+    hasMore: historyHasMore,
+    loadMore: loadMoreHistory,
+    refetchFirstPage: refetchHistoryFirstPage,
+  } = useCursorPage<BroadcastHistoryRow>({
+    query: BROADCASTS_PAGE_QUERY,
+    fieldName: "broadcastsPage",
     skip: historySkip,
-    fetchPolicy: "cache-and-network",
-    errorPolicy: "all",
   });
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletedHistoryIds, setDeletedHistoryIds] = useState<number[]>([]);
-  const historyRows = (broadcastsData?.broadcasts ?? []).filter(
-    (row) => !deletedHistoryIds.includes(Number(row.id)),
-  );
+  const historyRows = historyItems.filter((row) => !deletedHistoryIds.includes(Number(row.id)));
 
   const inProgress =
     pollTargetId != null &&
@@ -190,6 +183,9 @@ export default function BroadcastPage() {
     };
 
     const tick = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       pollTickRef.current += 1;
       if (pollTickRef.current > MAX_POLL_TICKS) {
         stopPollUnlocked(txt.broadcastPollFailed);
@@ -219,12 +215,12 @@ export default function BroadcastPage() {
           setMessage("");
           clearPendingPreview();
           setImages([]);
-          void client.refetchQueries({ include: [BROADCASTS_QUERY] });
+          void refetchHistoryFirstPage();
         } else if (st === "FAILED") {
           setBanner(txt.broadcastFailed);
           setPollTargetId(null);
           setRemoteStatus(null);
-          void client.refetchQueries({ include: [BROADCASTS_QUERY] });
+          void refetchHistoryFirstPage();
         } else {
           setBanner(txt.broadcastSending);
         }
@@ -235,12 +231,22 @@ export default function BroadcastPage() {
     };
 
     void tick();
-    const id = window.setInterval(() => void tick(), POLL_MS);
+    const id = window.setInterval(() => {
+      void tick();
+    }, POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [pollTargetId, client, txt.broadcastSending, txt.broadcastSent, txt.broadcastFailed, txt.broadcastPollFailed]);
+  }, [
+    pollTargetId,
+    client,
+    txt.broadcastSending,
+    txt.broadcastSent,
+    txt.broadcastFailed,
+    txt.broadcastPollFailed,
+    refetchHistoryFirstPage,
+  ]);
 
   useEffect(() => {
     if (!formToast) return;
@@ -356,7 +362,7 @@ export default function BroadcastPage() {
     try {
       const res = await deleteBroadcast({
         variables: { id },
-        refetchQueries: [{ query: BROADCASTS_QUERY }],
+        refetchQueries: [{ query: BROADCASTS_PAGE_QUERY, variables: { limit: 50, cursor: null } }],
         awaitRefetchQueries: true,
       });
       if (res.data?.deleteBroadcast === true) {
@@ -372,7 +378,6 @@ export default function BroadcastPage() {
   };
 
   return (
-    <RequireAuth>
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pb-40 pt-4">
           <div className="flex items-center gap-3 mb-4">
@@ -562,6 +567,13 @@ export default function BroadcastPage() {
                       })}
                     </ul>
                   )}
+                  <LoadMoreButton
+                    hasMore={historyHasMore}
+                    loadingMore={historyLoadingMore}
+                    loadMoreLabel={txt.loadMore}
+                    loadingMoreLabel={txt.loadingMore}
+                    onLoadMore={loadMoreHistory}
+                  />
                 </div>
               </section>
             </div>
@@ -569,6 +581,13 @@ export default function BroadcastPage() {
         </div>
         <BottomNav currentKey="profile" />
       </div>
+  );
+}
+
+export default function BroadcastPage() {
+  return (
+    <RequireAuth>
+      <BroadcastPageInner />
     </RequireAuth>
   );
 }

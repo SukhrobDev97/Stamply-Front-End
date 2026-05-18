@@ -88,7 +88,8 @@ export default function WorkspacesPage() {
   const canQuery = clientReady && ready && isAuthenticated && !!token;
   const { data, loading, error, refetch } = useQuery<MyWorkspacesQueryData>(MY_WORKSPACES_QUERY, {
     skip: !canQuery,
-    fetchPolicy: "network-only",
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
   });
 
   const awaitingFirstWorkspacePayload = canQuery && loading && data === undefined;
@@ -158,7 +159,8 @@ export default function WorkspacesPage() {
                 const isActive = w.is_active_workspace;
                 const isBusy = selecting && busyId === w.business_id;
                 const normalizedStatus = String(w.status || "").toLowerCase();
-                const isDeactivated = normalizedStatus === "blocked" || normalizedStatus === "deactivated";
+                const isDeactivated =
+                  normalizedStatus === "deactivated" || normalizedStatus === "blocked";
                 return (
                   <button
                     key={w.business_id}

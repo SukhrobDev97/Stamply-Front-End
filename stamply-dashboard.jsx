@@ -214,33 +214,6 @@ function RewardsCard() {
   );
 }
 
-/* ─── Bottom Nav ─── */
-function NavItem({ icon, label, active }) {
-  return (
-    <button
-      className={`flex flex-col items-center gap-1 py-2 px-3 rounded-xl flex-1 ${pressable}`}
-      style={{
-        color: active ? PALETTE.accent : PALETTE.textMute,
-        background: active ? `${PALETTE.accent}0f` : "transparent",
-      }}
-    >
-      <span className="text-xl leading-none">{icon}</span>
-      <span
-        className="text-[10px] font-semibold"
-        style={{ letterSpacing: "0.04em" }}
-      >
-        {label}
-      </span>
-      {active && (
-        <div
-          className="absolute bottom-0 w-4 h-0.5 rounded-full"
-          style={{ background: PALETTE.accent }}
-        />
-      )}
-    </button>
-  );
-}
-
 /* ─── Main Dashboard ─── */
 export default function StamplyDashboard() {
   const [activeTab, setActiveTab] = useState("Home");
@@ -256,13 +229,11 @@ export default function StamplyDashboard() {
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
-      style={{ background: "#CBD5E1", fontFamily: "'DM Sans', sans-serif" }}
+      style={{
+        background: "#CBD5E1",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+      }}
     >
-      <link
-        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap"
-        rel="stylesheet"
-      />
-
       {/* Phone frame */}
       <div
         className="relative w-full max-w-sm overflow-hidden"

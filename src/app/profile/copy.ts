@@ -127,10 +127,18 @@ export const t = {
     homeTrialInactiveCard3Title: "Qayta faollashtirish mumkin",
     homeTrialInactiveCard3Body: "Bizga bog‘lanish orqali faoliyatni davom ettirishingiz mumkin.",
     homeTrialInactiveCta: "Hizmatni faollashtirish",
+    trialWarningTomorrow:
+      "Bepul sinov muddati ertaga tugaydi. To‘lov qilish orqali xizmatdan uzluksiz foydalanishda davom etishingiz mumkin.",
+    trialWarningToday:
+      "Bepul sinov muddati bugun tugaydi. Xizmat to‘xtab qolmasligi uchun to‘lov qiling.",
+    trialWarningPay: "To‘lash",
+    trialWarningContinue: "Davom etish",
 
     customersFailed: "Mijozlar yuklanmadi",
     customersSearchPh: "Ism bo‘yicha qidirish",
     customersTotalLabel: "umumiy",
+    loadMore: "Yana yuklash",
+    loadingMore: "Yuklanmoqda…",
     customersEmpty: "Hozircha mijozlar yo‘q",
 
     visitsTitle: "Tashriflar",
@@ -345,10 +353,18 @@ export const t = {
     homeTrialInactiveCard3Title: "Можно снова включить",
     homeTrialInactiveCard3Body: "Напишите нам, чтобы продолжить работу.",
     homeTrialInactiveCta: "Включить сервис",
+    trialWarningTomorrow:
+      "Бесплатный пробный период заканчивается завтра. Оплатите, чтобы продолжить пользоваться сервисом без перерыва.",
+    trialWarningToday:
+      "Бесплатный пробный период заканчивается сегодня. Оплатите, чтобы сервис не остановился.",
+    trialWarningPay: "Оплатить",
+    trialWarningContinue: "Продолжить",
 
     customersFailed: "Не удалось загрузить клиентов",
     customersSearchPh: "Поиск по имени или телефону",
     customersTotalLabel: "Всего",
+    loadMore: "Загрузить ещё",
+    loadingMore: "Загрузка…",
     customersEmpty: "Пока нет клиентов",
 
     visitsTitle: "Визиты",

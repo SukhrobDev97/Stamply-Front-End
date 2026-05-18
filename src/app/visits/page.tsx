@@ -1,34 +1,22 @@
 "use client";
 
 import { BottomNav } from "@/components/common/bottom-nav";
+import { LoadMoreButton } from "@/components/common/load-more-button";
 import { RequireAuth } from "@/components/common/require-auth";
 import { SectionTitle } from "@/components/common/section-title";
 import { GIVE_VISIT_MUTATION } from "@/graphql/mutations/giveVisit.mutation";
 import { REDEEM_REWARD_MUTATION } from "@/graphql/mutations/redeemReward.mutation";
-import { MY_CUSTOMERS_QUERY } from "@/graphql/queries/myCustomers.query";
-import { useMutation, useQuery } from "@apollo/client/react";
+import { useCustomersPage, type CustomerListItem } from "@/hooks/use-customers-page";
+import { useMutation } from "@apollo/client/react";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/app/providers";
 import { useAppLang } from "@/lib/use-app-lang";
-
-type Customer = {
-  id: number;
-  name: string;
-  phone: string;
-  totalVisits: number;
-  stampCount: number;
-};
 
 type RecentItem = {
   id: string;
   title: string;
   createdAt: string;
-};
-
-type MyCustomersQueryData = {
-  myCustomers: Customer[];
 };
 
 type GiveVisitMutationData = {
@@ -69,11 +57,16 @@ export default function VisitsPage() {
   const [rewardModal, setRewardModal] = useState<{ rewardId: number } | null>(null);
   const [recent, setRecent] = useState<RecentItem[]>([]);
 
-  const { ready, isAuthenticated } = useAuth();
-  const { data, loading, error } = useQuery<MyCustomersQueryData>(MY_CUSTOMERS_QUERY, {
-    fetchPolicy: "network-only",
-    skip: !ready || !isAuthenticated,
-  });
+  const {
+    items,
+    loading,
+    loadingMore,
+    error,
+    hasMore,
+    loadMore,
+    refetchFirstPage,
+  } = useCustomersPage();
+
   const [giveVisit, { loading: giving }] = useMutation<GiveVisitMutationData>(GIVE_VISIT_MUTATION);
   const [redeemReward, { loading: redeeming }] = useMutation<RedeemRewardMutationData>(
     REDEEM_REWARD_MUTATION,
@@ -86,33 +79,33 @@ export default function VisitsPage() {
   }, [toast]);
 
   const filtered = useMemo(() => {
-    if (loading || error) return [];
-    const customers = data?.myCustomers ?? [];
+    if (loading && items.length === 0) return [];
+    if (error && items.length === 0) return [];
     const s = q.trim().toLowerCase();
-    if (!s) return customers;
-    return customers.filter((c) => {
+    if (!s) return items;
+    return items.filter((c) => {
       return (
         String(c.name ?? "").toLowerCase().includes(s) ||
         String(c.phone ?? "").toLowerCase().includes(s)
       );
     });
-  }, [data, error, loading, q]);
+  }, [items, error, loading, q]);
 
-  const onGiveStamp = async (c: Customer) => {
+  const onGiveStamp = async (c: CustomerListItem) => {
     try {
       const res = await giveVisit({
         variables: { customerId: Number(c.id) },
-        refetchQueries: [{ query: MY_CUSTOMERS_QUERY }],
       });
 
       const data = res.data?.giveVisit;
       if (!data?.success) return;
 
+      void refetchFirstPage();
+
       const now = new Date().toISOString();
 
       if (data.rewardUnlocked) {
         const rewardId = data.rewardId;
-        // Navigate to Rewards immediately when unlocked.
         router.push(rewardId != null ? `/rewards?rewardId=${Number(rewardId)}` : "/rewards");
         setRecent((prev) =>
           [
@@ -125,19 +118,18 @@ export default function VisitsPage() {
           ].slice(0, 5),
         );
         return;
-      } else {
-        setToast(txt.visitsStampAdded);
-        setRecent((prev) =>
-          [
-            {
-              id: `${now}:${c.id}`,
-              title: `${c.name} → ${txt.visitsRecentStamp}`,
-              createdAt: now,
-            },
-            ...prev,
-          ].slice(0, 5),
-        );
       }
+      setToast(txt.visitsStampAdded);
+      setRecent((prev) =>
+        [
+          {
+            id: `${now}:${c.id}`,
+            title: `${c.name} → ${txt.visitsRecentStamp}`,
+            createdAt: now,
+          },
+          ...prev,
+        ].slice(0, 5),
+      );
     } catch {
       setToast(txt.homeFailed);
     }
@@ -148,12 +140,12 @@ export default function VisitsPage() {
     try {
       const res = await redeemReward({
         variables: { rewardId: rewardModal.rewardId },
-        refetchQueries: [{ query: MY_CUSTOMERS_QUERY }],
       });
       if (res.data?.redeemReward !== true) {
         setToast(txt.homeFailed);
         return;
       }
+      void refetchFirstPage();
       setRewardModal(null);
       setToast(txt.visitsRewardGiven);
     } catch {
@@ -184,7 +176,7 @@ export default function VisitsPage() {
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.homeLoading}
             </div>
-          ) : error ? (
+          ) : error && items.length === 0 ? (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500">
               {txt.visitsFailed}
             </div>
@@ -214,7 +206,7 @@ export default function VisitsPage() {
                     <button
                       type="button"
                       disabled={giving || redeeming}
-                      onClick={() => onGiveStamp(c)}
+                      onClick={() => void onGiveStamp(c)}
                       className="rounded-xl bg-[#0284C7] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                     >
                       {txt.visitsGiveStamp}
@@ -222,6 +214,14 @@ export default function VisitsPage() {
                   </div>
                 ))}
               </div>
+
+              <LoadMoreButton
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                loadMoreLabel={txt.loadMore}
+                loadingMoreLabel={txt.loadingMore}
+                onLoadMore={loadMore}
+              />
 
               <div className="mt-8">
                 <SectionTitle>{txt.visitsRecent}</SectionTitle>

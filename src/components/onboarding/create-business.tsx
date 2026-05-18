@@ -16,7 +16,7 @@ export function CreateBusinessOnboarding() {
       await createBusiness({
         variables: { input: { name: trimmed } },
       });
-    } catch (e) {
+    } catch {
       alert("Failed to create business");
     }
   };

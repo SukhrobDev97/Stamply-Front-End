@@ -7,12 +7,24 @@ import { TELEGRAM_LOGIN_MUTATION } from "@/graphql/mutations/telegramLogin.mutat
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+
+type JwtPayload = {
+  sub?: string | number;
+  role?: string;
+  global_role?: string;
+  telegram_id?: string | number;
+};
+
+type TelegramLoginMutationData = {
+  telegramLogin?: { accessToken?: string | null } | null;
+};
 import { AppLifecycle } from "@/components/common/app-lifecycle";
 import { StamplyDevTools } from "@/components/common/stamply-dev-tools";
 import { ToastProvider } from "@/components/providers/toast-provider";
@@ -67,12 +79,12 @@ function AuthGate({
   setRole: (role: string | null) => void;
   setUserId: (id: string | null) => void;
   setTelegramId: (id: string | null) => void;
-  decodeJwtPayload: (token: string) => any | null;
+  decodeJwtPayload: (token: string) => JwtPayload | null;
 }) {
-  const [telegramLogin] = useMutation(TELEGRAM_LOGIN_MUTATION);
+  const [telegramLogin] = useMutation<TelegramLoginMutationData>(TELEGRAM_LOGIN_MUTATION);
   const client = useApolloClient();
 
-  const loginWithTelegram = async () => {
+  const loginWithTelegram = useCallback(async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData ?? "";
 
@@ -85,9 +97,7 @@ function AuthGate({
         variables: { initData },
       });
 
-      const token = (res.data as any)?.telegramLogin?.accessToken as
-        | string
-        | undefined;
+      const token = res.data?.telegramLogin?.accessToken ?? undefined;
 
       if (!token) {
         return { ok: false as const, reason: "LOGIN_FAILED" };
@@ -124,9 +134,18 @@ function AuthGate({
       }
       return { ok: false as const, reason: "LOGIN_FAILED" };
     }
-  };
+  }, [
+    client,
+    decodeJwtPayload,
+    setAccessToken,
+    setIsAuthenticated,
+    setRole,
+    setTelegramId,
+    setUserId,
+    telegramLogin,
+  ]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       localStorage.removeItem("accessToken");
     } catch {
@@ -143,11 +162,11 @@ function AuthGate({
     setUserId(null);
     setTelegramId(null);
     setReady(true);
-  };
+  }, [client, setAccessToken, setIsAuthenticated, setReady, setRole, setTelegramId, setUserId]);
 
   const authState: AuthState = useMemo(() => {
     return { accessToken, isAuthenticated, ready, role, userId, telegramId, loginWithTelegram, logout };
-  }, [accessToken, isAuthenticated, ready, role, userId, telegramId]);
+  }, [accessToken, isAuthenticated, ready, role, userId, telegramId, loginWithTelegram, logout]);
 
   return (
     <AuthContext.Provider value={authState}>{children}</AuthContext.Provider>
@@ -155,7 +174,7 @@ function AuthGate({
 }
 
 export function Providers({ children }: { children: ReactNode }) {
-  function decodeJwtPayload(token: string): any | null {
+  function decodeJwtPayload(token: string): JwtPayload | null {
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
       return payload;
@@ -198,26 +217,28 @@ export function Providers({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("accessToken");
-    if (!savedToken) {
+    queueMicrotask(() => {
+      const savedToken = localStorage.getItem("accessToken");
+      if (!savedToken) {
+        setReady(true);
+        return;
+      }
+
+      const payload = decodeJwtPayload(savedToken);
+
+      setAccessToken(savedToken);
+      setIsAuthenticated(true);
+      setRole(
+        typeof payload?.role === "string"
+          ? payload.role
+          : typeof payload?.global_role === "string"
+            ? payload.global_role
+            : null
+      );
+      setUserId(payload?.sub != null ? String(payload.sub) : null);
+      setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
       setReady(true);
-      return;
-    }
-
-    const payload = decodeJwtPayload(savedToken);
-
-    setAccessToken(savedToken);
-    setIsAuthenticated(true);
-    setRole(
-      typeof payload?.role === "string"
-        ? payload.role
-        : typeof payload?.global_role === "string"
-          ? payload.global_role
-          : null
-    );
-    setUserId(payload?.sub != null ? String(payload.sub) : null);
-    setTelegramId(payload?.telegram_id != null ? String(payload.telegram_id) : null);
-    setReady(true);
+    });
   }, []);
 
   useEffect(() => {

@@ -48,15 +48,18 @@ export function AppModeProvider({
     readStoredMode(initialRole),
   );
 
+  const resolvedMode: AppMode =
+    initialRole != null && initialRole !== "platform_owner" && mode === "platform"
+      ? "business"
+      : mode;
+
   useEffect(() => {
-    if (initialRole === null) return;
-    if (initialRole !== "platform_owner") {
+    if (initialRole != null && initialRole !== "platform_owner") {
       try {
         sessionStorage.setItem(STORAGE_KEY, "business");
       } catch {
         // ignore
       }
-      setMode((m) => (m === "platform" ? "business" : m));
     }
   }, [initialRole]);
 
@@ -74,7 +77,8 @@ export function AppModeProvider({
       window.removeEventListener("stamply:session-invalidated", onInvalid);
   }, []);
 
-  const switchToBusiness = useCallback((_businessId: number) => {
+  const switchToBusiness = useCallback((businessId: number) => {
+    void businessId;
     try {
       sessionStorage.setItem(STORAGE_KEY, "business");
     } catch {
@@ -93,7 +97,7 @@ export function AppModeProvider({
   }, []);
 
   return (
-    <AppModeContext.Provider value={{ mode, switchToBusiness, switchToPlatform }}>
+    <AppModeContext.Provider value={{ mode: resolvedMode, switchToBusiness, switchToPlatform }}>
       {children}
     </AppModeContext.Provider>
   );

@@ -21,11 +21,17 @@ export const RECOVERABLE_AUTH_CODES = new Set([
   "BUSINESS_NOT_FOUND_FOR_USER",
 ]);
 
-export const BUSINESS_INACTIVE_CODES = new Set([
-  "BUSINESS_INACTIVE",
+/** Business cannot be used — show inactive UX, do not logout. */
+export const BUSINESS_ACCESS_BLOCKED_CODES = new Set([
   "TRIAL_EXPIRED",
+  "BUSINESS_DEACTIVATED",
+  "BUSINESS_INACTIVE",
   "BUSINESS_BLOCKED",
+  "SUBSCRIPTION_EXPIRED",
 ]);
+
+/** @deprecated Use BUSINESS_ACCESS_BLOCKED_CODES */
+export const BUSINESS_INACTIVE_CODES = BUSINESS_ACCESS_BLOCKED_CODES;
 
 export const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 502, 503, 504]);
 
@@ -37,8 +43,13 @@ export function isRecoverableAuthCode(code: string): boolean {
   return RECOVERABLE_AUTH_CODES.has(code);
 }
 
+export function isBusinessAccessBlockedCode(code: string): boolean {
+  return BUSINESS_ACCESS_BLOCKED_CODES.has(code);
+}
+
+/** @deprecated Use isBusinessAccessBlockedCode */
 export function isBusinessInactiveCode(code: string): boolean {
-  return BUSINESS_INACTIVE_CODES.has(code);
+  return isBusinessAccessBlockedCode(code);
 }
 
 export function isRetryableApiError(err: ApiError): boolean {

@@ -5,14 +5,18 @@ import { t } from "@/app/profile/copy";
 import { apolloClient } from "@/lib/apollo/client";
 import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { ProfileProvider, type ProfileData } from "@/lib/profile/profile-context";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { AuthStatusPanel } from "@/components/common/auth-status-panel";
+import { BusinessTrialInactiveScreen } from "@/components/home/business-trial-inactive-screen";
 import {
+  isBusinessAccessBlockedError,
   profileApolloErrorOnlyRecoverable,
   shouldDestroySessionForProfileError,
 } from "@/lib/auth-session-guard";
 import { mapApiErrorToUserMessage, normalizeApiError } from "@/lib/api";
+import { openStamplySupportTelegram } from "@/lib/support-telegram";
 import { useMutation, useQuery } from "@apollo/client/react";
 import { motion } from "framer-motion";
 import { MessageCircle, ShieldCheck } from "lucide-react";
@@ -102,9 +106,10 @@ export function RequireAuth({
     error: profileError,
     data: profileData,
     refetch: refetchProfile,
-  } = useQuery(PROFILE_QUERY, {
-    skip: !ready || !token || isPlatformOwner,
-    fetchPolicy: "network-only",
+  } = useQuery<ProfileData>(PROFILE_QUERY, {
+    skip: !ready || !token,
+    fetchPolicy: "cache-and-network",
+    nextFetchPolicy: "cache-first",
   });
 
   const fatalProfile = Boolean(
@@ -132,6 +137,7 @@ export function RequireAuth({
   useEffect(() => {
     if (!ready) return;
     if (!token || isPlatformOwner) return;
+    if (profileError && isBusinessAccessBlockedError(profileError)) return;
     const noBiz =
       profileData != null && !(profileData as { profile?: { business?: unknown } })?.profile?.business;
     const recoverErr = Boolean(
@@ -208,13 +214,13 @@ export function RequireAuth({
             className="w-full rounded-[30px] border border-black/5 bg-white p-5 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08),0_2px_10px_rgba(15,23,42,0.04)]"
           >
             <div className="mb-2 flex justify-end">
-              <div className="flex shrink-0 items-center rounded-full border border-slate-200/80 bg-slate-50/80 p-0.5 text-[11px] font-bold text-slate-500">
+              <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
                 <button
                   type="button"
                   onClick={() => setStoredLang("uz")}
                   className={[
-                    "h-7 rounded-full px-2.5 transition-all duration-200 active:scale-95",
-                    lang === "uz" ? "bg-white text-[#0284C7] shadow-[0_1px_6px_rgba(15,23,42,0.08)]" : "",
+                    "rounded-full px-3 py-1.5 transition-colors",
+                    lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
                   ].join(" ")}
                 >
                   UZ
@@ -223,8 +229,8 @@ export function RequireAuth({
                   type="button"
                   onClick={() => setStoredLang("ru")}
                   className={[
-                    "h-7 rounded-full px-2.5 transition-all duration-200 active:scale-95",
-                    lang === "ru" ? "bg-white text-[#0284C7] shadow-[0_1px_6px_rgba(15,23,42,0.08)]" : "",
+                    "rounded-full px-3 py-1.5 transition-colors",
+                    lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
                   ].join(" ")}
                 >
                   RU
@@ -292,7 +298,18 @@ export function RequireAuth({
   }
 
   if (isPlatformOwner) {
-    return <>{children}</>;
+    return (
+      <ProfileProvider
+        value={{
+          profileData: profileData as ProfileData | undefined,
+          loading: validating,
+          error: profileError,
+          refetch: refetchProfile,
+        }}
+      >
+        {children}
+      </ProfileProvider>
+    );
   }
 
   if (validating && !profileError) {
@@ -314,6 +331,19 @@ export function RequireAuth({
         title={txt.profileLoadError}
         body={mapApiErrorToUserMessage(normalizeApiError(profileError), lang)}
       />
+    );
+  }
+
+  if (profileError && isBusinessAccessBlockedError(profileError)) {
+    return (
+      <motion.div className="min-h-dvh bg-[#f7f7f8] text-black">
+        <BusinessTrialInactiveScreen
+          txt={txt}
+          onCta={openStamplySupportTelegram}
+          onRetry={() => void refetchProfile()}
+          retryLabel={txt.profileRetry}
+        />
+      </motion.div>
     );
   }
 
@@ -355,7 +385,14 @@ export function RequireAuth({
   }
 
   return (
-    <>
+    <ProfileProvider
+      value={{
+        profileData: profileData as ProfileData | undefined,
+        loading: validating,
+        error: profileError,
+        refetch: refetchProfile,
+      }}
+    >
       {children}
       {toast ? (
         <div className="pointer-events-none fixed left-0 right-0 bottom-[104px] z-50 mx-auto flex max-w-md justify-center px-4">
@@ -364,6 +401,8 @@ export function RequireAuth({
           </div>
         </div>
       ) : null}
-    </>
+    </ProfileProvider>
   );
 }
+
+export { useProfile, type ProfileData } from "@/lib/profile/profile-context";

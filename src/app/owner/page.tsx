@@ -7,6 +7,8 @@ import { switchToBusinessWorkspace } from "@/lib/workspace-switch";
 import { useApolloClient, useMutation, useQuery } from "@apollo/client/react";
 import { OWNER_ME_QUERY } from "@/graphql/queries/ownerMe.query";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
+import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { OWNER_DASHBOARD } from "@/graphql/queries/owner-dashboard";
 import { PLATFORM_BUSINESSES_QUERY } from "@/graphql/queries/platformBusinesses.query";
 import { PLATFORM_DASHBOARD_STATS_QUERY } from "@/graphql/queries/platformDashboardStats.query";
 import { PLATFORM_BUSINESS_QUERY } from "@/graphql/queries/platformBusiness.query";
@@ -40,23 +42,9 @@ import { useAppMode } from "@/lib/app-mode";
 type RawStatus = string;
 type DisplayStatus = "active" | "trial" | "deactivated";
 
-function toDisplay(s: RawStatus, trialEndsAt?: string | null): DisplayStatus {
-  const sl = String(s || "").toLowerCase();
-  if (sl === "trial") {
-    if (trialEndsAt) {
-      const end = new Date(trialEndsAt).getTime();
-      if (Number.isFinite(end) && end <= Date.now()) return "deactivated";
-    }
-    return "trial";
-  }
-  if (sl === "active" || sl === "ACTIVE") {
-    if (trialEndsAt) {
-      const end = new Date(trialEndsAt).getTime();
-      if (Number.isFinite(end) && end > Date.now()) return "trial";
-    }
-    return "active";
-  }
-  return "deactivated";
+/** Backend lifecycle: ACTIVE | DEACTIVATED (trial expiry → DEACTIVATED). */
+function toDisplay(s: RawStatus): DisplayStatus {
+  return String(s || "").toLowerCase() === "active" ? "active" : "deactivated";
 }
 
 function toLifecycleEnum(d: "all" | DisplayStatus): "ALL" | "ACTIVE" | "TRIAL" | "DEACTIVATED" {
@@ -140,8 +128,8 @@ const STATUS_META: Record<DisplayStatus, { label: string; cls: string }> = {
   deactivated: { label: "Deactivated", cls: "bg-slate-100 text-slate-700  ring-slate-200"    },
 };
 
-function StatusBadge({ raw, trialEndsAt }: { raw: RawStatus; trialEndsAt?: string | null }) {
-  const d = toDisplay(raw, trialEndsAt);
+function StatusBadge({ raw }: { raw: RawStatus }) {
+  const d = toDisplay(raw);
   const m = STATUS_META[d];
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${m.cls}`}>
@@ -325,6 +313,9 @@ export default function OwnerPage() {
       refetchWs(),
       refetchStats(),
       selectedId != null ? detail.refetch() : Promise.resolve(),
+      client.refetchQueries({
+        include: [PROFILE_QUERY, MY_WORKSPACES_QUERY, OWNER_DASHBOARD],
+      }),
     ]);
   };
 
@@ -463,7 +454,7 @@ export default function OwnerPage() {
                     <div className="truncate text-sm font-semibold text-slate-900">{b.name}</div>
                     <div className="mt-0.5 text-xs text-slate-500">{b.businessType || "—"}</div>
                   </div>
-                  <StatusBadge raw={b.status} trialEndsAt={b.trialEndsAt} />
+                  <StatusBadge raw={b.status} />
                 </div>
 
                 <div className="mt-2 flex items-center gap-3 text-xs text-slate-500">
@@ -600,7 +591,7 @@ export default function OwnerPage() {
                           <div className="truncate text-base font-semibold text-slate-900">{d.name}</div>
                           <div className="mt-0.5 text-xs text-slate-500">{d.businessType || "—"}</div>
                         </div>
-                        <StatusBadge raw={d.status} trialEndsAt={d.trialEndsAt} />
+                        <StatusBadge raw={d.status} />
                       </div>
                       {d.trialEndsAt ? (
                         <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-500">

@@ -6,10 +6,13 @@ import { CREATE_BUSINESS } from "@/graphql/mutations/createBusiness";
 import { SELECT_WORKSPACE_MUTATION } from "@/graphql/mutations/selectWorkspace.mutation";
 import { MY_WORKSPACES_QUERY } from "@/graphql/queries/myWorkspaces.query";
 import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
-import { t } from "@/app/profile/copy";
-import { setStoredLang, STAMPLY_LANG_CHANGED, type AppLang } from "@/lib/lang";
+import { useAppLang } from "@/lib/use-app-lang";
 import { apolloClient } from "@/lib/apollo/client";
 import { useMutation } from "@apollo/client/react";
+
+type CreateBusinessMutationData = {
+  createBusiness?: { id?: number | null } | null;
+};
 import { ArrowLeft, Building2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -21,27 +24,13 @@ export default function CreateBusinessPage() {
   const isPlatformOwner = role === "platform_owner";
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
 
-  const [lang, setLang] = useState<AppLang>("uz");
-  useEffect(() => {
-    const apply = () => {
-      try {
-        const v = localStorage.getItem("lang");
-        if (v === "ru" || v === "uz") setLang(v);
-      } catch {
-        // ignore
-      }
-    };
-    apply();
-    window.addEventListener(STAMPLY_LANG_CHANGED, apply);
-    return () => window.removeEventListener(STAMPLY_LANG_CHANGED, apply);
-  }, []);
+  const { txt } = useAppLang();
 
   useEffect(() => {
     if (!ready) return;
     if (!isAuthenticated || !token) router.replace("/");
   }, [isAuthenticated, ready, router, token]);
 
-  const txt = t[lang];
   const [bizName, setBizName] = useState("");
   const [bizPhone, setBizPhone] = useState("");
   const [bizAddress, setBizAddress] = useState("");
@@ -59,7 +48,7 @@ export default function CreateBusinessPage() {
   return (
     <div className="min-h-dvh bg-[#F5F7FB] text-black">
       <div className="mx-auto max-w-md px-4 pb-24 pt-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <button
             type="button"
             onClick={() => router.back()}
@@ -67,28 +56,6 @@ export default function CreateBusinessPage() {
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
           </button>
-          <div className="flex shrink-0 items-center rounded-full border border-gray-200 bg-white p-0.5 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setStoredLang("uz")}
-              className={[
-                "rounded-full px-3 py-1.5 transition-colors",
-                lang === "uz" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-              ].join(" ")}
-            >
-              UZ
-            </button>
-            <button
-              type="button"
-              onClick={() => setStoredLang("ru")}
-              className={[
-                "rounded-full px-3 py-1.5 transition-colors",
-                lang === "ru" ? "bg-[#0284C7] text-white shadow-sm" : "text-gray-500",
-              ].join(" ")}
-            >
-              RU
-            </button>
-          </div>
         </div>
 
         <div className="w-full rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -103,19 +70,19 @@ export default function CreateBusinessPage() {
               value={bizName}
               onChange={(e) => setBizName(e.target.value)}
               placeholder={txt.registerBizNamePh}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             />
             <input
               value={bizPhone}
               onChange={(e) => setBizPhone(e.target.value)}
               placeholder={txt.registerPhonePh}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             />
             <input
               value={bizAddress}
               onChange={(e) => setBizAddress(e.target.value)}
               placeholder={txt.registerAddressPh}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             />
             <input
               value={bizType}
@@ -123,7 +90,7 @@ export default function CreateBusinessPage() {
               onBlur={() => setBizTypeTouched(true)}
               placeholder={txt.registerTypePh}
               className={[
-                "w-full rounded-2xl border bg-white px-4 py-3 text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2",
+                "w-full rounded-2xl border bg-white px-4 py-3 text-base text-black placeholder:text-slate-400 focus:outline-none focus:ring-2",
                 bizTypeTouched && isBizTypeInvalid
                   ? "border-red-300 focus:ring-red-100"
                   : "border-slate-200 focus:ring-slate-200",
@@ -158,7 +125,8 @@ export default function CreateBusinessPage() {
                       },
                     },
                   });
-                  const newBusinessId: number | null = (res.data as any)?.createBusiness?.id ?? null;
+                  const newBusinessId: number | null =
+                    (res.data as CreateBusinessMutationData | undefined)?.createBusiness?.id ?? null;
                   if (isPlatformOwner) {
                     if (newBusinessId) {
                       try { await selectWorkspace({ variables: { businessId: newBusinessId } }); } catch { /* ignore */ }
@@ -167,12 +135,21 @@ export default function CreateBusinessPage() {
                     try { await apolloClient.query({ query: MY_WORKSPACES_QUERY, fetchPolicy: "network-only" }); } catch { /* ignore */ }
                     router.replace("/");
                   } else {
+                    if (newBusinessId) {
+                      try {
+                        await selectWorkspace({ variables: { businessId: newBusinessId } });
+                      } catch {
+                        /* ignore */
+                      }
+                    }
                     try {
                       await Promise.all([
                         apolloClient.query({ query: PROFILE_QUERY, fetchPolicy: "network-only" }),
                         apolloClient.query({ query: MY_WORKSPACES_QUERY, fetchPolicy: "network-only" }),
                       ]);
-                    } catch { /* ignore refresh errors */ }
+                    } catch {
+                      /* ignore refresh errors */
+                    }
                     router.replace("/");
                   }
                 } catch {

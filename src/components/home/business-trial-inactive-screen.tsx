@@ -14,9 +14,13 @@ type TrialInactiveCopy = {
 export function BusinessTrialInactiveScreen({
   txt,
   onCta,
+  onRetry,
+  retryLabel,
 }: {
   txt: TrialInactiveCopy;
   onCta: () => void;
+  onRetry?: () => void;
+  retryLabel?: string;
 }) {
   const rows: { title: string; body: string; emoji: string }[] = [
     { emoji: "⏰", title: txt.homeTrialInactiveCard1Title, body: txt.homeTrialInactiveCard1Body },
@@ -53,6 +57,15 @@ export function BusinessTrialInactiveScreen({
         >
           {txt.homeTrialInactiveCta}
         </button>
+        {onRetry && retryLabel ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 w-full rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 transition active:scale-[0.99]"
+          >
+            {retryLabel}
+          </button>
+        ) : null}
       </div>
     </div>
   );

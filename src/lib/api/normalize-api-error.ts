@@ -1,6 +1,6 @@
 import { CombinedGraphQLErrors, ServerError } from "@apollo/client/errors";
 import type { ApiError } from "@/lib/api/api-error";
-import { isBusinessInactiveCode } from "@/lib/api/api-error";
+import { isBusinessAccessBlockedCode } from "@/lib/api/api-error";
 import { parseGraphQLErrors } from "@/lib/api/parse-graphql-error";
 import { parseHttpErrorBody } from "@/lib/api/parse-http-error";
 
@@ -124,5 +124,9 @@ export function getPrimaryErrorCode(err: unknown): string {
 
 export function isBusinessInactiveApiError(err: unknown): boolean {
   const api = normalizeApolloError(err) ?? (isApiError(err) ? err : null);
-  return api ? isBusinessInactiveCode(api.code) : false;
+  return api ? isBusinessAccessBlockedCode(api.code) : false;
+}
+
+export function isBusinessAccessBlockedApiError(err: unknown): boolean {
+  return isBusinessInactiveApiError(err);
 }

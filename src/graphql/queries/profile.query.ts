@@ -14,6 +14,8 @@ export const PROFILE_QUERY = gql`
         phone
         address
         businessType
+        status
+        trialEndsAt
       }
     }
   }

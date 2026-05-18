@@ -6,7 +6,7 @@ import { RequireAuth } from "@/components/common/require-auth";
 import { CREATE_STAFF_INVITE_MUTATION } from "@/graphql/mutations/createStaffInvite.mutation";
 import { LEAVE_BUSINESS_MUTATION } from "@/graphql/mutations/leaveBusiness.mutation";
 import { REMOVE_STAFF_MUTATION } from "@/graphql/mutations/removeStaff.mutation";
-import { PROFILE_QUERY } from "@/graphql/queries/profile.query";
+import { useProfile } from "@/components/common/require-auth";
 import { GET_BUSINESS_STAFF_QUERY } from "@/graphql/queries/getBusinessStaff.query";
 import { useAuth } from "@/app/providers";
 import { useOverlayModal } from "@/hooks/use-overlay-modal";
@@ -19,20 +19,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STAMPLY_LANG_CHANGED } from "@/lib/lang";
 import { openStamplySupportTelegram } from "@/lib/support-telegram";
 import { t, type ProfileLang } from "./copy";
-
-type ProfileData = {
-  profile: {
-    role?: string | null;
-    name?: string | null;
-    avatar_url?: string | null;
-    business?: {
-      id: number;
-      name?: string | null;
-      phone?: string | null;
-      address?: string | null;
-    } | null;
-  } | null;
-};
 
 type StaffRow = {
   id: string | number;
@@ -86,14 +72,11 @@ function SettingsRow({
   );
 }
 
-export default function ProfilePage() {
+function ProfilePageInner() {
   const router = useRouter();
   const { ready, isAuthenticated, logout } = useAuth();
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
-  const { data, loading, error } = useQuery<ProfileData>(PROFILE_QUERY, {
-    skip: !ready || !isAuthenticated || !token,
-    fetchPolicy: "network-only",
-  });
+  const { profileData: data, loading, error } = useProfile();
   const [toast, setToast] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<{ id: number; name: string } | null>(null);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
@@ -226,7 +209,6 @@ export default function ProfilePage() {
   };
 
   return (
-    <RequireAuth>
       <div className="min-h-dvh bg-[#f7f7f8] text-black">
         <div className="mx-auto max-w-md px-4 pt-3 pb-32">
           <div className="mb-4 flex items-center justify-between gap-2">
@@ -541,6 +523,13 @@ export default function ProfilePage() {
         ) : null}
 
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <RequireAuth>
+      <ProfilePageInner />
     </RequireAuth>
   );
 }

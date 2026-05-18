@@ -1,6 +1,7 @@
 "use client";
 
-import { ApolloClient, HttpLink, InMemoryCache } from "@apollo/client";
+import { ApolloClient, HttpLink } from "@apollo/client";
+import { createApolloCache } from "@/lib/apollo/cache";
 import { setContext } from "@apollo/client/link/context";
 import { ErrorLink } from "@apollo/client/link/error";
 import { shouldLogoutForApiError } from "@/lib/auth-session-guard";
@@ -64,7 +65,7 @@ if (typeof window !== "undefined") {
 
 export const apolloClient = new ApolloClient({
   link: errorLink.concat(authLink).concat(httpLink),
-  cache: new InMemoryCache(),
+  cache: createApolloCache(),
 });
 
 clientRef = apolloClient;

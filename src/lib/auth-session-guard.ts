@@ -39,4 +39,7 @@ export function shouldLogoutForApiError(err: unknown): boolean {
   return isSessionInvalidCode(api.code);
 }
 
-export { isBusinessInactiveApiError } from "@/lib/api/normalize-api-error";
+export {
+  isBusinessAccessBlockedError,
+  isBusinessInactiveApiError,
+} from "@/lib/business-lifecycle";
